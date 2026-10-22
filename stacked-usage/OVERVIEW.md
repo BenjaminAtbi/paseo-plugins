@@ -1,26 +1,17 @@
-<!--
-OVERVIEW.md is required to list your plugin in the registry. Keep it beside
-paseo-plugin.json in your repository at the pinned commit and in your npm package.
-Replace this comment with useful facts before publishing.
+Stacked usage adds a usage widget to the bottom of the sidebar: one line per account,
+stacked, each showing its session and weekly windows as meters coloured by how much is
+used (green below 70%, amber from 70%, red above 90%). Paseo's own sidebar summary draws
+its meters in grey; this one keeps the colour.
 
-This overview is for people choosing a plugin in Paseo, on the plugin page under
-its install command. README assumes a GitHub audience and includes technical
-details, installation instructions, and badges. Long, AI-generated READMEs leave
-people reading past that material to understand what the plugin does.
+It also reports the Claude and Codex accounts that ZeroSub manages to Paseo's usage
+system, so they appear in Paseo's own usage screens as well as in the widget. Readings come
+from ZeroSub's saved usage file, so the plugin makes no extra calls to Anthropic or OpenAI;
+a ZeroSub account's numbers are as fresh as ZeroSub's last reading. The account ZeroSub
+calls the CLI's own login is left to Paseo's built-in source, so it is not listed twice.
 
-Write these parts in order, including only what helps someone decide to install:
+Tap the widget, or open Settings, Plugins, Stacked usage, Sidebar meters, to see every
+account and window with its reset time and to choose which meters show in the sidebar.
+Session and weekly windows show unless hidden; per-model windows show once switched on.
 
-1. Describe what your plugin is and does in plain terms first.
-2. Explain how it works only when it is not obvious.
-3. Explain setup when needed: settings, accounts, tokens, providers, tools, or
-   other plugins. Include applicable daemon version and operating system
-   requirements. Setup guidance is allowed; installation instructions are not.
-4. Explain capabilities and settings worth understanding, what each option does,
-   what the plugin reads or sends and where, permissions, and known limits.
-
-Length follows complexity; a theme needs one paragraph. Choose headings only
-when they help. Use sentence case and plain factual language, with no em dashes.
-Omit installation commands, badges, changelog, contributing or license sections,
-marketing, and unsupported claims. Avoid implementation filler such as empty
-cleanup functions, theme-token field lists, or lists of absent features.
--->
+Requires Paseo 0.12 or later. ZeroSub is optional: without it the widget shows the
+accounts Paseo already reports.
