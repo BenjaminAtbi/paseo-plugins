@@ -1,0 +1,8 @@
+{
+  "id": "stacked-usage",
+  "name": "Stacked usage",
+  "media": [],
+  "requirements": {
+    "paseo": ">=0.12.0"
+  }
+}
