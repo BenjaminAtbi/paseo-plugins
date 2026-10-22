@@ -1,8 +1,8 @@
 Context bar adds a pill above each agent's message box showing how close the conversation
-is to Claude Code's next automatic compaction, as a text bar such as
-`▰▰▰▰▰▱▱▱▱▱ 312k/600k`. A dot beside it turns from green to amber at 70% of the way
-and red above 90%. It updates during a turn, at every model call, not only when the turn
-ends. Tap it for the exact token counts and where the compaction point came from.
+is to Claude Code's next automatic compaction, as a text bar such as `▰▰▰▱▱▱ 47%`.
+Hover it for the token counts. A dot beside it turns from green to amber at 70% of the
+way and red above 90%. It updates during a turn, at every model call, not only when the
+turn ends. Tap it for the exact token counts and where the compaction point came from.
 
 Paseo's own context ring measures against the model's whole window. This bar measures
 against the point where Claude Code actually compacts: `modelSettings.<model>.autoCompactWindow`

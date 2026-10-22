@@ -32,7 +32,7 @@ interface AgentLike {
   lastUsage?: { contextWindowUsedTokens?: number; contextWindowMaxTokens?: number };
 }
 
-const CELLS = 10;
+const CELLS = 6;
 const SETTINGS_REFRESH_MS = 60_000;
 
 function toneOf(pct: number): Tone {
@@ -52,10 +52,18 @@ function formatTokens(tokens: number): string {
   return `${Math.round(tokens / 1000)}k`;
 }
 
-/** "▰▰▰▰▰▱▱▱▱▱ 312k/600k": plain text, because a pill's label can only be a string. */
+/**
+ * "▰▰▰▱▱▱ 47%": plain text, because a pill's label can only be a string. Paseo caps a
+ * composer pill at 160px, which leaves about ten characters beside the icon.
+ */
 function barLabel(reading: Reading): string {
   const filled = Math.max(0, Math.min(CELLS, Math.round((reading.pct / 100) * CELLS)));
-  return `${"▰".repeat(filled)}${"▱".repeat(CELLS - filled)} ${formatTokens(reading.used)}/${formatTokens(reading.point.tokens)}`;
+  return `${"▰".repeat(filled)}${"▱".repeat(CELLS - filled)} ${Math.round(reading.pct)}%`;
+}
+
+/** The pill's title, shown as its tooltip, carries what the label has no room for. */
+function barTitle(reading: Reading): string {
+  return `Context: ${formatTokens(reading.used)} of ${formatTokens(reading.point.tokens)} before compaction`;
 }
 
 // A pill's icon is the only part a plugin draws itself (16×16), so it carries the colour.
@@ -127,7 +135,7 @@ function Details({ theme, ...context }: PluginButtonContentProps) {
  */
 export function startContextPills(client: PluginClientContext): () => void {
   const agents = new Map<string, AgentLike>();
-  const pills = new Map<string, { registration: PluginButtonRegistration; label: string; tone: Tone }>();
+  const pills = new Map<string, { registration: PluginButtonRegistration; label: string; title: string; tone: Tone }>();
   let settings: CompactSettings | null = null;
   let stopped = false;
 
@@ -146,11 +154,13 @@ export function startContextPills(client: PluginClientContext): () => void {
     publish();
 
     const label = barLabel(reading);
+    const title = barTitle(reading);
     const existing = pills.get(agent.id);
     if (existing) {
-      if (existing.label === label && existing.tone === reading.tone) return;
-      existing.registration.update({ label, icon: DOTS[reading.tone] });
+      if (existing.label === label && existing.title === title && existing.tone === reading.tone) return;
+      existing.registration.update({ label, title, icon: DOTS[reading.tone] });
       existing.label = label;
+      existing.title = title;
       existing.tone = reading.tone;
       return;
     }
@@ -159,13 +169,13 @@ export function startContextPills(client: PluginClientContext): () => void {
       workspaceId: agent.workspaceId!,
       agentId: agent.id,
       button: {
-        title: "Context until compaction",
+        title,
         icon: DOTS[reading.tone],
         label,
         behavior: { kind: "popover", Content: Details },
       },
     });
-    pills.set(agent.id, { registration, label, tone: reading.tone });
+    pills.set(agent.id, { registration, label, title, tone: reading.tone });
   }
 
   function drop(agentId: string) {
