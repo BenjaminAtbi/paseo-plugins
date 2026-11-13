@@ -2,11 +2,11 @@
 import type { PluginTheme } from "@getpaseo/plugin";
 import { openExternalUrl, useRpc, useSettings, type PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { copyText, Modal, ScrollView, TextInput, useToast } from "@getpaseo/plugin/client/react-native";
-import { SettingsInput, SettingsSection, SettingsSwitch } from "@getpaseo/plugin/client/ui";
+import { SettingsAction, SettingsSection, SettingsSwitch } from "@getpaseo/plugin/client/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ActivityIndicator, Pressable, Switch, Text, View } from "react-native";
-import { UsageSettings } from "./details";
+import { BetaSettings } from "./details";
 import {
   cancelLoginRpc,
   clearLimitRpc,
@@ -23,7 +23,7 @@ import {
   type ReadingSource,
   type ReopenSummary,
 } from "../shared/accounts";
-import { routingSettings, type RoutingPreferences } from "../shared/settings";
+import { DEFAULT_CONTINUE_PROMPT, routingSettings, type RoutingPreferences } from "../shared/settings";
 import { isShown, setShown, toneFor, type Meter } from "../shared/usage";
 import { formatPct, formatReset, useDisplaySettings, useUsageRows } from "./data";
 import { MeterBar } from "./meter";
@@ -597,7 +597,62 @@ function RemoveModal({ theme, account, onClose }: { theme: PluginTheme; account:
 
 // --------------------------------------------------------------------------- routing
 
+function PromptModal({
+  theme,
+  initial,
+  onSave,
+  onClose,
+}: {
+  theme: PluginTheme;
+  initial: string;
+  onSave(prompt: string): void;
+  onClose(): void;
+}) {
+  const [text, setText] = useState(initial);
+  const trimmed = text.trim();
+  return (
+    <Modal title="Prompt sent after a switch" open onOpenChange={(open) => (open ? undefined : onClose())}>
+      <Modal.Content>
+        <Text style={{ color: theme.colors.foregroundMuted, fontSize: 13 }}>
+          Sent to an agent once it reopens on another account, so the interrupted turn keeps going.
+        </Text>
+        <TextInput
+          value={text}
+          onChangeText={setText}
+          multiline
+          maxLength={PROMPT_MAX}
+          textAlignVertical="top"
+          accessibilityLabel="Prompt sent after a switch"
+          style={{
+            minHeight: 160,
+            color: theme.colors.foreground,
+            backgroundColor: theme.colors.surface2,
+            borderColor: theme.colors.border,
+            borderWidth: 1,
+            borderRadius: 8,
+            paddingHorizontal: 12,
+            paddingVertical: 10,
+            fontSize: 14,
+          }}
+        />
+        <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, textAlign: "right" }}>
+          {text.length}/{PROMPT_MAX}
+        </Text>
+        <Row end>
+          <Button theme={theme} label="Use the default" onPress={() => setText(DEFAULT_CONTINUE_PROMPT)} />
+          <Button theme={theme} label="Cancel" onPress={onClose} />
+          <Button theme={theme} label="Save" primary disabled={!trimmed} onPress={() => onSave(trimmed)} />
+        </Row>
+      </Modal.Content>
+    </Modal>
+  );
+}
+
+/** The longest prompt the routing settings accept. */
+const PROMPT_MAX = 500;
+
 function RoutingSection({ theme, canReopen }: { theme: PluginTheme; canReopen: boolean }) {
+  const [editingPrompt, setEditingPrompt] = useState(false);
   const settings = useSettings(routingSettings);
   const values = settings.status === "ready" ? settings.values : null;
   const save = (patch: Partial<RoutingPreferences>) => {
@@ -626,13 +681,23 @@ function RoutingSection({ theme, canReopen }: { theme: PluginTheme; canReopen: b
       {toggle("autoSwitch", "Switch accounts at a usage limit", "Moves an agent to the account with the most room when its account runs out or signs out.")}
       {toggle("autoContinue", "Carry on after a switch", "Sends the prompt below so the interrupted turn keeps going.")}
       {values ? (
-        <SettingsInput
+        <SettingsAction
           label="Prompt sent after a switch"
-          initialValue={values.continuePrompt}
+          hint={values.continuePrompt}
+          actionLabel="Edit"
           disabled={!values.enabled || !values.autoContinue}
-          onChangeText={(text) => {
-            if (text.trim()) save({ continuePrompt: text.trim() });
+          onPress={() => setEditingPrompt(true)}
+        />
+      ) : null}
+      {editingPrompt && values ? (
+        <PromptModal
+          theme={theme}
+          initial={values.continuePrompt}
+          onSave={(continuePrompt) => {
+            save({ continuePrompt });
+            setEditingPrompt(false);
           }}
+          onClose={() => setEditingPrompt(false)}
         />
       ) : null}
       {toggle("balanceNewAgents", "Spread new agents", "New agents open on the account with the most room instead of the default.")}
@@ -663,6 +728,8 @@ type Dialog =
 const NARROW_WIDTH = 900;
 const SIDE_PADDING = 0.1;
 const GAP = 16;
+/** Paseo's default chat width, left-aligned with the accounts above. Plugins can't read the user's own setting. */
+const SETTINGS_MAX_WIDTH = 820;
 
 export function AccountsScreen({ theme, layout }: PluginSurfaceProps) {
   const [dialog, setDialog] = useState<Dialog>(null);
@@ -728,9 +795,15 @@ export function AccountsScreen({ theme, layout }: PluginSurfaceProps) {
           />
         ))}
       </View>
+      {display.settings.saveError ? (
+        <Text style={{ color: theme.colors.statusDanger }}>{display.settings.saveError}</Text>
+      ) : null}
       {data?.nextReadAt ? <Text style={muted}>Next usage read {formatReset(data.nextReadAt)?.replace("resets in", "in") ?? "soon"}.</Text> : null}
-      <RoutingSection theme={theme} canReopen={data?.routing.canReopen ?? true} />
-      <UsageSettings theme={theme} />
+      <View style={{ width: "100%", maxWidth: SETTINGS_MAX_WIDTH, gap: GAP, marginTop: 8 }}>
+        <Text style={{ color: theme.colors.foreground, fontSize: 20, fontWeight: "700" }}>Settings</Text>
+        <RoutingSection theme={theme} canReopen={data?.routing.canReopen ?? true} />
+        <BetaSettings theme={theme} />
+      </View>
 
       {dialog?.kind === "sign-in" ? (
         <SignInModal theme={theme} accountId={dialog.accountId} logins={data?.logins ?? []} onClose={() => setDialog(null)} />

@@ -2,8 +2,8 @@ Load Balancer runs several Claude subscriptions side by side: it keeps their sig
 Claude session on one of them, and moves agents to another account when one runs out.
 
 Settings live on one page, opened from the sidebar's Accounts row, the sidebar meters, or
-Settings, Plugins, Load Balancer, Accounts and usage: accounts, routing, sidebar meters and the
-beta switch.
+Settings, Plugins, Load Balancer, Accounts and usage: accounts (with each meter's sidebar switch),
+routing and the beta switch.
 
 Accounts: the page lists every account with its usage. Add one by signing in. Each account gets
 its own home under `$PASEO_HOME/load-balancer/homes`, holding only its sign-in; everything else (projects, transcripts, settings) is shared with `~/.claude`, so an agent

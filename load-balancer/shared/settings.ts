@@ -28,7 +28,7 @@ export const betaSettings = defineSettings({
 
 /** Sent after an automatic switch, so the interrupted turn keeps going. */
 export const DEFAULT_CONTINUE_PROMPT =
-  "You were interrupted by a usage limit; that has been sorted out. Continue exactly where you left off.";
+  "You were interrupted by a usage limit. Continue where you left off.";
 
 /** Which account each Claude session opens on, and what happens when one runs out. */
 export const routingSettings = defineSettings({
