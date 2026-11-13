@@ -32,8 +32,7 @@ const QUERY_KEY = ["load-balancer", "accounts"];
 
 /** The orange of Claude's logo, marking Claude Code's own sign-in. */
 const CLAUDE_ORANGE = "#D97757";
-const CLAUDE_CODE_HINT =
-  "Claude Code is signed in to this subscription too (~/.claude). It's one account: both share the same usage limits, and sessions are routed to it through this account's own sign-in.";
+const CLAUDE_CODE_HINT = "Base Claude Code install is signed into this account";
 
 const SOURCE_LABEL: Record<ReadingSource, string> = {
   headers: "from model responses",
