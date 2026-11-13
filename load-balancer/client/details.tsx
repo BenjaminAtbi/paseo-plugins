@@ -3,7 +3,7 @@ import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { SettingsAction, SettingsSection, SettingsSwitch } from "@getpaseo/plugin/client/ui";
 import { ScrollView, Text, View } from "react-native";
 import { isShown, setShown, type Meter, type Row } from "../shared/usage";
-import { formatPct, formatReset, useDisplaySettings, useUsageRows } from "./data";
+import { formatPct, formatReset, useBetaSettings, useDisplaySettings, useUsageRows } from "./data";
 import { MeterBar } from "./meter";
 
 function MeterLine({ meter, theme }: { meter: Meter; theme: PluginTheme }) {
@@ -29,6 +29,12 @@ export function UsageDetails({ theme, layout }: PluginSurfaceProps) {
   const usage = useUsageRows();
   const { settings, values } = useDisplaySettings();
   const ready = settings.status === "ready";
+  const beta = useBetaSettings();
+
+  function toggleHeaderProxy(headerProxy: boolean) {
+    if (beta.settings.status !== "ready") return;
+    void beta.settings.save({ ...beta.settings.values, headerProxy }, beta.settings.revision);
+  }
 
   function toggle(meter: Meter, shown: boolean) {
     if (settings.status !== "ready") return;
@@ -65,11 +71,23 @@ export function UsageDetails({ theme, layout }: PluginSurfaceProps) {
       ))}
       <SettingsAction
         label="Readings"
-        hint="Paseo keeps each reading for five minutes; ZeroSub accounts show ZeroSub's latest reading."
+        hint="Paseo keeps each reading for five minutes."
         actionLabel={usage.isFetching ? "Refreshing…" : "Refresh"}
         disabled={usage.isFetching}
         onPress={() => void usage.refetch()}
       />
+      <SettingsSection title="Beta">
+        {beta.settings.saveError ? (
+          <Text style={{ color: theme.colors.statusDanger }}>{beta.settings.saveError}</Text>
+        ) : null}
+        <SettingsSwitch
+          label="Read Claude usage from model responses"
+          hint="Routes Claude sessions through a local proxy, from each session's next open. Polling stays as the fallback."
+          value={beta.headerProxy}
+          disabled={beta.settings.status !== "ready" || beta.settings.saving}
+          onValueChange={toggleHeaderProxy}
+        />
+      </SettingsSection>
     </ScrollView>
   );
 }

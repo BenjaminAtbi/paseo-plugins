@@ -1,6 +1,6 @@
 {
-  "id": "stacked-usage",
-  "name": "Stacked usage",
+  "id": "load-balancer",
+  "name": "Load Balancer",
   "media": [],
   "requirements": {
     "paseo": ">=0.12.0"

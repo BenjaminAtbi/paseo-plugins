@@ -2,8 +2,9 @@
 
 Local Paseo plugins, one per folder.
 
-- `stacked-usage/` - colour-coded, stacked sidebar usage meters for every account,
-  including the ones ZeroSub manages. See its `OVERVIEW.md`.
+- `load-balancer/` - several Claude subscriptions side by side: sign-ins, per-session account
+  routing with failover at usage limits, and colour-coded sidebar usage meters. See its
+  `OVERVIEW.md`.
 - `context-bar/` - a text bar above each agent's message box showing how close it is to
   Claude Code's next automatic compaction. See its `OVERVIEW.md`.
 

@@ -1,7 +1,7 @@
 import { useRpc, useSettings } from "@getpaseo/plugin/client";
 import type { PluginTheme } from "@getpaseo/plugin";
 import { useQuery } from "@tanstack/react-query";
-import { displaySettings } from "../shared/settings";
+import { betaSettings, displaySettings } from "../shared/settings";
 import { listUsageRpc, type Tone } from "../shared/usage";
 
 // The daemon caches each report for five minutes, so polling faster only re-reads its cache.
@@ -10,7 +10,7 @@ const REFRESH_MS = 60_000;
 export function useUsageRows() {
   const listUsage = useRpc(listUsageRpc);
   return useQuery({
-    queryKey: ["stacked-usage", "rows"],
+    queryKey: ["load-balancer", "rows"],
     queryFn: () => listUsage({}),
     refetchInterval: REFRESH_MS,
   });
@@ -21,6 +21,11 @@ const EMPTY = { hidden: [] as string[], pinned: [] as string[] };
 export function useDisplaySettings() {
   const settings = useSettings(displaySettings);
   return { settings, values: settings.status === "ready" ? settings.values : EMPTY };
+}
+
+export function useBetaSettings() {
+  const settings = useSettings(betaSettings);
+  return { settings, headerProxy: settings.status === "ready" && settings.values.headerProxy };
 }
 
 export function toneColor(tone: Tone, theme: PluginTheme): string {
