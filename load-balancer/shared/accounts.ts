@@ -91,12 +91,6 @@ export const cancelLoginRpc = defineRpc({
   output: ok,
 });
 
-export const importAccountRpc = defineRpc({
-  name: "accounts.import",
-  input: z.object({ path: z.string() }),
-  output: z.object({ accountId: z.string() }),
-});
-
 export const renameAccountRpc = defineRpc({
   name: "accounts.rename",
   input: z.object({ accountId: z.string(), label: z.string() }),

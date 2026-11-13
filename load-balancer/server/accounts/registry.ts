@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { copyFile, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { mkdir } from "node:fs/promises";
+import { join } from "node:path";
 import { z } from "zod";
 import {
   accountWindowSchema,
@@ -12,7 +12,7 @@ import {
 } from "../../shared/accounts";
 import { dataPath, readData, writeData } from "../data";
 import { mergeWindow, type HeaderReadings } from "../readings";
-import { ClaudeLogin, hasCredentials, mainIdentity, parseJsonObject, readIdentity, readUsage } from "./claude";
+import { ClaudeLogin, hasCredentials, mainIdentity, readIdentity, readUsage } from "./claude";
 import { prepareClaudeHome, removeHome } from "./homes";
 import { homesDir, mainClaudeDir } from "./paths";
 import { defaultAccount, limitedUntil, type Binding, type Readings } from "./routing";
@@ -498,32 +498,6 @@ export class AccountRegistry {
     await mkdir(home, { recursive: true });
     await prepareClaudeHome(home, true);
     return home;
-  }
-
-  /**
-   * Adds an existing sign-in from a Claude config directory. Its credentials and account record
-   * are copied into a new home; the source directory is left as it is.
-   */
-  async importFrom(path: string): Promise<string> {
-    const source = resolve(path.trim().replace(/^["']|["']$/g, ""));
-    if (!(await stat(source).catch(() => null))?.isDirectory()) throw new Error("That folder doesn't exist.");
-    if (!(await hasCredentials(source))) throw new Error("No Claude sign-in (.credentials.json) in that folder.");
-    const home = await this.newHome();
-    try {
-      await copyFile(join(source, ".credentials.json"), join(home, ".credentials.json"));
-      const sourceConfig = parseJsonObject(await readFile(join(source, ".claude.json"), "utf8").catch(() => ""));
-      if (sourceConfig?.oauthAccount) {
-        const target = join(home, ".claude.json");
-        const config = parseJsonObject(await readFile(target, "utf8").catch(() => "")) ?? {};
-        config.oauthAccount = sourceConfig.oauthAccount;
-        await writeFile(`${target}.tmp`, `${JSON.stringify(config, null, 2)}\n`);
-        await rename(`${target}.tmp`, target);
-      }
-      return (await this.adopt(home, null)).id;
-    } catch (error) {
-      await removeHome(home);
-      throw error;
-    }
   }
 
   // ------------------------------------------------------------------------- sign-in

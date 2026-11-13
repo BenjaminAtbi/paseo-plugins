@@ -2,8 +2,7 @@ Load Balancer runs several Claude subscriptions side by side: it keeps their sig
 Claude session on one of them, and moves agents to another account when one runs out.
 
 Accounts: the sidebar's Accounts row (or Settings, Plugins, Load Balancer, Accounts) lists every
-account with its usage. Add one by signing in, or import a Claude config folder that is already
-signed in. Each account gets its own home under `$PASEO_HOME/load-balancer/homes`, holding only its
+account with its usage. Add one by signing in. Each account gets its own home under `$PASEO_HOME/load-balancer/homes`, holding only its
 sign-in; everything else (projects, transcripts, settings) is shared with `~/.claude`, so an agent
 keeps its history whichever account it opens on. Claude Code's own sign-in is listed too, unless a
 home already holds that subscription; then that account carries a "Claude Code" badge. With no

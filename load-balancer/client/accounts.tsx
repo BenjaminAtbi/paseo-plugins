@@ -9,7 +9,6 @@ import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import {
   cancelLoginRpc,
   clearLimitRpc,
-  importAccountRpc,
   listAccountsRpc,
   refreshAccountRpc,
   removeAccountRpc,
@@ -516,44 +515,6 @@ function SignInModal({
 
 // --------------------------------------------------------------------------- small dialogs
 
-function ImportModal({ theme, onClose }: { theme: PluginTheme; onClose(): void }) {
-  const importAccount = useRpc(importAccountRpc);
-  const invalidate = useInvalidate();
-  const [path, setPath] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const run = async () => {
-    if (!path.trim()) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await importAccount({ path });
-      invalidate();
-      onClose();
-    } catch (failure) {
-      setError(describe(failure));
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <Modal title="Import a sign-in" open onOpenChange={(open) => (open ? undefined : onClose())}>
-      <Modal.Content>
-        <Text style={{ color: theme.colors.foreground }}>
-          A Claude config folder on the host that is already signed in (it holds .credentials.json). Its sign-in is copied
-          into a new home here; the folder is left as it is, so stop using it afterwards.
-        </Text>
-        <Field theme={theme} value={path} onChange={setPath} placeholder="C:\path\to\claude-config" onSubmit={() => void run()} label="Folder" />
-        {error ? <Text style={{ color: theme.colors.statusDanger }}>{error}</Text> : null}
-        <Row end>
-          <Button theme={theme} label="Cancel" onPress={onClose} />
-          <Button theme={theme} label="Import" primary busy={busy} disabled={!path.trim()} onPress={() => void run()} />
-        </Row>
-      </Modal.Content>
-    </Modal>
-  );
-}
-
 function RenameModal({ theme, account, onClose }: { theme: PluginTheme; account: AccountView; onClose(): void }) {
   const rename = useRpc(renameAccountRpc);
   const invalidate = useInvalidate();
@@ -672,7 +633,6 @@ function RoutingSection({ theme, canReopen }: { theme: PluginTheme; canReopen: b
 
 type Dialog =
   | { kind: "sign-in"; accountId?: string }
-  | { kind: "import" }
   | { kind: "rename"; account: AccountView }
   | { kind: "remove"; account: AccountView }
   | null;
@@ -709,7 +669,6 @@ export function AccountsScreen({ theme, layout }: PluginSurfaceProps) {
       </View>
       <Row>
         <Button theme={theme} label="Add account" primary onPress={() => setDialog({ kind: "sign-in" })} />
-        <Button theme={theme} label="Import a sign-in" onPress={() => setDialog({ kind: "import" })} />
       </Row>
       {accounts.isLoading ? <Text style={muted}>Loading accounts…</Text> : null}
       {accounts.error ? <Text style={{ color: theme.colors.statusDanger }}>{describe(accounts.error)}</Text> : null}
@@ -734,7 +693,6 @@ export function AccountsScreen({ theme, layout }: PluginSurfaceProps) {
       {dialog?.kind === "sign-in" ? (
         <SignInModal theme={theme} accountId={dialog.accountId} logins={data?.logins ?? []} onClose={() => setDialog(null)} />
       ) : null}
-      {dialog?.kind === "import" ? <ImportModal theme={theme} onClose={() => setDialog(null)} /> : null}
       {dialog?.kind === "rename" ? <RenameModal theme={theme} account={dialog.account} onClose={() => setDialog(null)} /> : null}
       {dialog?.kind === "remove" ? <RemoveModal theme={theme} account={dialog.account} onClose={() => setDialog(null)} /> : null}
     </ScrollView>

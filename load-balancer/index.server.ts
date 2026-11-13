@@ -11,7 +11,6 @@ import { listUsageRpc } from "./shared/usage";
 import {
   cancelLoginRpc,
   clearLimitRpc,
-  importAccountRpc,
   listAccountsRpc,
   refreshAccountRpc,
   removeAccountRpc,
@@ -111,7 +110,6 @@ export default function contribute(server: PluginServerContext) {
     registry.cancelLogin(loginId);
     return ok;
   });
-  server.handle(importAccountRpc, async ({ path }) => ({ accountId: await registry.importFrom(path) }));
   server.handle(renameAccountRpc, async ({ accountId, label }) => {
     await registry.rename(accountId, label);
     return ok;
