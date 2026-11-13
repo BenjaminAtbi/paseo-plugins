@@ -35,6 +35,9 @@ export const listUsageRpc = defineRpc({
   output: z.object({ rows: z.array(rowSchema) }),
 });
 
+/** Sidebar labels that override the source's own, keyed by window id. */
+export const SHORT_LABELS: Record<string, string> = { five_hour: "5h", weekly: "wk", weekly_model_fable: "fb" };
+
 /** The thresholds Paseo uses when a window arrives without a tone. */
 export function toneFor(usedPct: number | null, given?: string | null): Tone {
   const parsed = toneSchema.safeParse(given);

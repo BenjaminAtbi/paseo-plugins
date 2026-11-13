@@ -17,8 +17,8 @@ export function UsageFooter({ theme, openScreen }: PluginSidebarItemProps) {
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel="Usage by account"
-      onPress={() => openScreen({ screenId: "usage" })}
+      accessibilityLabel="Claude accounts"
+      onPress={() => openScreen({ screenId: "accounts" })}
       style={({ pressed }) => ({
         width: "100%",
         gap: 4,

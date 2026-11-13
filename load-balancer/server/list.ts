@@ -1,5 +1,5 @@
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
-import { toneFor, type Meter, type Row } from "../shared/usage";
+import { SHORT_LABELS, toneFor, type Meter, type Row } from "../shared/usage";
 import { mergeWindow, type HeaderReadings } from "./readings";
 
 /** The account part of "Claude (someone@example.com)", trimmed to its local part. */
@@ -40,7 +40,7 @@ export async function listUsage(
       return {
         key: `${key}/${window.id}`,
         label: window.label,
-        shortLabel: window.shortLabel ?? window.label,
+        shortLabel: SHORT_LABELS[window.id] ?? window.shortLabel ?? window.label,
         usedPct,
         resetsAt,
         tone: toneFor(usedPct, merged === polled ? window.tone : undefined),

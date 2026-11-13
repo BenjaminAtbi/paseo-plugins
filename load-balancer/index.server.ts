@@ -134,7 +134,7 @@ export default function contribute(server: PluginServerContext) {
     label: "Claude",
     icon: "assets/claude.svg",
     input: lbInputSchema,
-    discover: (scope) => discoverAccounts(registry, scope),
+    discover: (scope) => discoverAccounts(registry, scope, (baseUrl) => proxy.owns(baseUrl)),
     fetch: (input) => fetchAccountUsage(registry, input),
   });
   return () => {

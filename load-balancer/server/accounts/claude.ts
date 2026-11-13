@@ -160,12 +160,21 @@ export async function cachedUsage(home: string | null): Promise<Extract<UsageRea
   return { kind: "ok", windows, readAt: new Date(cache.fetchedAtMs).toISOString(), cached: true };
 }
 
+// Window ids match Paseo's own Claude source, so a meter keeps its sidebar setting whichever
+// source reported it.
 const WINDOW_LABELS: Array<[key: string, id: string, label: string]> = [
   ["five_hour", "five_hour", "Session"],
   ["seven_day", "weekly", "Weekly"],
-  ["seven_day_opus", "weekly_opus", "Weekly · Opus"],
-  ["seven_day_sonnet", "weekly_sonnet", "Weekly · Sonnet"],
+  ["seven_day_opus", "weekly_model_opus", "Weekly · Opus"],
+  ["seven_day_sonnet", "weekly_model_sonnet", "Weekly · Sonnet"],
 ];
+
+type ScopedLimit = {
+  kind?: unknown;
+  percent?: unknown;
+  resets_at?: unknown;
+  scope?: { model?: { id?: unknown; display_name?: unknown } | null } | null;
+};
 
 export function parseUsage(body: unknown): AccountWindow[] {
   if (!body || typeof body !== "object") return [];
@@ -176,6 +185,18 @@ export function parseUsage(body: unknown): AccountWindow[] {
     if (entry && typeof entry.utilization === "number") {
       windows.push({ id, label, usedPct: entry.utilization, resetsAt: isoDate(entry.resets_at) });
     }
+  }
+  // Per-model weekly limits (Fable, for one) arrive only in `limits[]`.
+  for (const limit of Array.isArray(record.limits) ? (record.limits as ScopedLimit[]) : []) {
+    if (limit?.kind !== "weekly_scoped") continue;
+    const modelId = str(limit.scope?.model?.id)?.trim() || null;
+    const name = str(limit.scope?.model?.display_name)?.trim() || modelId;
+    if (!name) continue;
+    const id = `weekly_model_${modelId ?? name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "")}`;
+    const usedPct = typeof limit.percent === "number" ? limit.percent : null;
+    const existing = windows.find((window) => window.id === id);
+    if (existing) existing.usedPct ??= usedPct;
+    else windows.push({ id, label: `Weekly · ${name}`, usedPct, resetsAt: isoDate(limit.resets_at) });
   }
   return windows;
 }

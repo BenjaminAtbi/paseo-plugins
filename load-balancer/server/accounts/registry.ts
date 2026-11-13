@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { z } from "zod";
 import {
   accountWindowSchema,
@@ -195,6 +195,22 @@ export class AccountRegistry {
       this.state.accounts.find((account) => account.kind === "main") ??
       (this.main.identity ? this.state.accounts.find((account) => account.identity === this.main.identity) : undefined)
     );
+  }
+
+  /** The account a Claude process signs in with: its `CLAUDE_CONFIG_DIR` home, else Claude Code's own sign-in. */
+  forConfigDir(configDir: string | undefined): Account | undefined {
+    if (!configDir) {
+      return (
+        this.state.accounts.find((account) => account.kind === "main") ??
+        (this.main.identity ? this.state.accounts.find((account) => account.identity === this.main.identity) : undefined)
+      );
+    }
+    const key = (path: string) => {
+      const full = resolve(path).replace(/[\\/]+$/, "");
+      return process.platform === "win32" ? full.toLowerCase() : full;
+    };
+    const wanted = key(configDir);
+    return this.state.accounts.find((account) => account.home !== null && key(account.home) === wanted);
   }
 
   /** Usage as routing sees it, at `now`. */

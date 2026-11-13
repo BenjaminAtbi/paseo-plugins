@@ -5,7 +5,8 @@ import { copyText, Modal, ScrollView, TextInput, useToast } from "@getpaseo/plug
 import { SettingsInput, SettingsSection, SettingsSwitch } from "@getpaseo/plugin/client/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, Switch, Text, View } from "react-native";
+import { UsageSettings } from "./details";
 import {
   cancelLoginRpc,
   clearLimitRpc,
@@ -23,8 +24,8 @@ import {
   type ReopenSummary,
 } from "../shared/accounts";
 import { routingSettings, type RoutingPreferences } from "../shared/settings";
-import { toneFor } from "../shared/usage";
-import { formatPct, formatReset } from "./data";
+import { isShown, setShown, toneFor, type Meter } from "../shared/usage";
+import { formatPct, formatReset, useDisplaySettings, useUsageRows } from "./data";
 import { MeterBar } from "./meter";
 
 const QUERY_KEY = ["load-balancer", "accounts"];
@@ -32,6 +33,11 @@ const QUERY_KEY = ["load-balancer", "accounts"];
 /** The orange of Claude's logo, marking Claude Code's own sign-in. */
 const CLAUDE_ORANGE = "#D97757";
 const CLAUDE_CODE_HINT = "Base Claude Code install is signed into this account";
+
+/** "Weekly · Fable" reads as "Fable" in a card, where every window is the account's. */
+function windowName(label: string): string {
+  return label.split(" · ").pop() ?? label;
+}
 
 const SOURCE_LABEL: Record<ReadingSource, string> = {
   headers: "from model responses",
@@ -214,6 +220,8 @@ function AccountCard({
   account,
   half,
   routing,
+  meters,
+  onToggleMeter,
   onSignIn,
   onRename,
   onRemove,
@@ -224,6 +232,9 @@ function AccountCard({
   half?: boolean;
   /** Routing is on, so the default and agent counts apply. */
   routing: boolean;
+  /** This account's sidebar meters by window id, with whether each shows; null while they load. */
+  meters: ReadonlyMap<string, { meter: Meter; shown: boolean }> | null;
+  onToggleMeter(meter: Meter, shown: boolean): void;
   onSignIn(): void;
   onRename(): void;
   onRemove(): void;
@@ -301,12 +312,23 @@ function AccountCard({
         const reset = formatReset(window.resetsAt);
         return (
           <View key={window.id} style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-            <Text style={{ width: 110, color: theme.colors.foreground, fontSize: 13 }}>{window.label}</Text>
+            <Text numberOfLines={1} style={{ width: 74, color: theme.colors.foreground, fontSize: 13 }}>
+              {windowName(window.label)}
+            </Text>
             <MeterBar usedPct={window.usedPct} tone={toneFor(window.usedPct)} theme={theme} height={6} />
             <Text style={{ width: 40, color: theme.colors.foreground, fontVariant: ["tabular-nums"] }}>
               {formatPct(window.usedPct)}
             </Text>
             <Text style={{ ...muted, width: 130 }}>{reset ?? ""}</Text>
+            <View style={{ width: 44, alignItems: "flex-end" }}>
+              {meters?.has(window.id) ? (
+                <Switch
+                  accessibilityLabel={`Show ${window.label} in the sidebar`}
+                  value={meters.get(window.id)!.shown}
+                  onValueChange={(shown) => onToggleMeter(meters.get(window.id)!.meter, shown)}
+                />
+              ) : null}
+            </View>
           </View>
         );
       })}
@@ -649,6 +671,23 @@ export function AccountsScreen({ theme, layout }: PluginSurfaceProps) {
   const accounts = useAccounts(dialog?.kind === "sign-in");
   const data = accounts.data;
   const muted = { color: theme.colors.foregroundMuted, fontSize: 13 };
+  const usage = useUsageRows();
+  const display = useDisplaySettings();
+
+  // The sidebar's rows are named "Claude (<email>)"; a card's switches are that row's meters.
+  function metersFor(account: AccountView): ReadonlyMap<string, { meter: Meter; shown: boolean }> | null {
+    if (!usage.data || display.settings.status !== "ready" || !account.email) return null;
+    const email = account.email.toLowerCase();
+    const row = usage.data.rows.find((entry) => entry.title.toLowerCase() === `claude (${email})`);
+    if (!row) return null;
+    return new Map(row.meters.map((meter) => [meter.key.slice(row.key.length + 1), { meter, shown: isShown(meter, display.values) }]));
+  }
+
+  function toggleMeter(meter: Meter, shown: boolean) {
+    const { settings } = display;
+    if (settings.status !== "ready" || settings.saving) return;
+    void settings.save(setShown(meter, shown, settings.values), settings.revision);
+  }
 
   return (
     <ScrollView
@@ -681,6 +720,8 @@ export function AccountsScreen({ theme, layout }: PluginSurfaceProps) {
             account={account}
             half={!narrow}
             routing={data.routing.enabled}
+            meters={metersFor(account)}
+            onToggleMeter={toggleMeter}
             onSignIn={() => setDialog({ kind: "sign-in", accountId: account.id })}
             onRename={() => setDialog({ kind: "rename", account })}
             onRemove={() => setDialog({ kind: "remove", account })}
@@ -689,6 +730,7 @@ export function AccountsScreen({ theme, layout }: PluginSurfaceProps) {
       </View>
       {data?.nextReadAt ? <Text style={muted}>Next usage read {formatReset(data.nextReadAt)?.replace("resets in", "in") ?? "soon"}.</Text> : null}
       <RoutingSection theme={theme} canReopen={data?.routing.canReopen ?? true} />
+      <UsageSettings theme={theme} />
 
       {dialog?.kind === "sign-in" ? (
         <SignInModal theme={theme} accountId={dialog.accountId} logins={data?.logins ?? []} onClose={() => setDialog(null)} />
