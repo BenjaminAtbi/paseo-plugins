@@ -5,8 +5,8 @@ import type {
   PluginClientContext,
 } from "@getpaseo/plugin/client";
 import type { PluginTheme } from "@getpaseo/plugin";
-import { useSyncExternalStore, type ComponentType } from "react";
-import { Text, View } from "react-native";
+import { useState, useSyncExternalStore, type ComponentType } from "react";
+import { Pressable, Text, View } from "react-native";
 import { compactPoint, compactSettingsRpc, type CompactPoint, type CompactSettings } from "../shared/compact";
 
 type Tone = "ok" | "warning" | "danger";
@@ -20,6 +20,8 @@ interface Reading {
   /** Share of the way to the compaction point, 0-100 and beyond. */
   pct: number;
   tone: Tone;
+  /** Mid-turn, a sent `/compact` would wait behind the turn, so the button waits too. */
+  busy: boolean;
 }
 
 interface AgentLike {
@@ -82,6 +84,9 @@ function Dot({ theme, size, tone }: PluginButtonIconProps & { tone: Tone }) {
   );
 }
 
+// The popover's Compact button sends through this; set while the plugin runs.
+let paseo: PluginClientContext["paseo"] | null = null;
+
 // Readings for the popover, which renders inside the app and reads them on demand.
 const readings = new Map<string, Reading>();
 const listeners = new Set<() => void>();
@@ -101,7 +106,52 @@ function useReading(agentId: string): Reading | undefined {
   return readings.get(agentId);
 }
 
-function Details({ theme, ...context }: PluginButtonContentProps) {
+function CompactButton({ theme, reading, close }: { theme: PluginTheme; reading: Reading; close(): void }) {
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const disabled = sending || reading.busy || !paseo;
+  async function compact() {
+    if (disabled) return;
+    setSending(true);
+    setError(null);
+    try {
+      // The same as typing /compact: Claude Code summarises the conversation and carries on from it.
+      await paseo!.agents.ref(reading.agentId).send("/compact");
+      close();
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure));
+      setSending(false);
+    }
+  }
+  return (
+    <View style={{ gap: 6, marginTop: 4 }}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Compact the conversation now"
+        disabled={disabled}
+        onPress={() => void compact()}
+        style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => ({
+          alignSelf: "flex-start",
+          paddingHorizontal: 12,
+          paddingVertical: 6,
+          borderRadius: 6,
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+          backgroundColor: pressed || hovered ? theme.colors.surface2 : "transparent",
+          opacity: disabled ? 0.5 : 1,
+        })}
+      >
+        <Text style={{ color: theme.colors.foreground, fontSize: 13 }}>{sending ? "Compacting…" : "Compact now"}</Text>
+      </Pressable>
+      {reading.busy ? (
+        <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>Available once the current turn ends.</Text>
+      ) : null}
+      {error ? <Text style={{ color: theme.colors.statusDanger, fontSize: 12 }}>{error}</Text> : null}
+    </View>
+  );
+}
+
+function Details({ theme, close, ...context }: PluginButtonContentProps) {
   const reading = useReading(context.context === "agent" ? context.agentId : "");
   const muted = { color: theme.colors.foregroundMuted, fontSize: 12 };
   if (!reading) return <Text style={muted}>No context reading yet.</Text>;
@@ -124,6 +174,7 @@ function Details({ theme, ...context }: PluginButtonContentProps) {
       <Text style={muted}>
         A per-launch override (CLAUDE_CODE_AUTO_COMPACT_WINDOW or --autocompact) is not visible here.
       </Text>
+      <CompactButton theme={theme} reading={reading} close={close} />
     </View>
   );
 }
@@ -138,6 +189,7 @@ export function startContextPills(client: PluginClientContext): () => void {
   const pills = new Map<string, { registration: PluginButtonRegistration; label: string; title: string; tone: Tone }>();
   let settings: CompactSettings | null = null;
   let stopped = false;
+  paseo = client.paseo;
 
   function render(agent: AgentLike) {
     const used = agent.lastUsage?.contextWindowUsedTokens;
@@ -149,7 +201,16 @@ export function startContextPills(client: PluginClientContext): () => void {
     }
     const point = compactPoint(agent.model, max, settings);
     const pct = (used / point.tokens) * 100;
-    const reading: Reading = { agentId: agent.id, model: agent.model, used, max, point, pct, tone: toneOf(pct) };
+    const reading: Reading = {
+      agentId: agent.id,
+      model: agent.model,
+      used,
+      max,
+      point,
+      pct,
+      tone: toneOf(pct),
+      busy: agent.status === "running",
+    };
     readings.set(agent.id, reading);
     publish();
 
@@ -228,6 +289,7 @@ export function startContextPills(client: PluginClientContext): () => void {
 
   return () => {
     stopped = true;
+    paseo = null;
     clearInterval(timer);
     unsubscribe?.();
     void release?.();
