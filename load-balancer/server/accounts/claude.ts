@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AccountWindow } from "../../shared/accounts";
+import { claudeCommand, describeCommand, type ClaudeCommand } from "./claude-command";
 import { mainClaudeDir, mainClaudeGlobalConfig } from "./paths";
 import { firstUrl, run, stripAnsi } from "./process";
 
@@ -54,7 +55,8 @@ export function identityOf(orgId: string | null, email: string): string {
 }
 
 export async function readIdentity(home: string | null): Promise<Identity> {
-  const result = await run("claude", ["auth", "status", "--json"], { env: claudeEnv(home), timeoutMs: 30_000 });
+  const claude = await claudeCommand();
+  const result = await run(claude.command, [...claude.args, "auth", "status", "--json"], { env: claudeEnv(home), timeoutMs: 30_000 });
   const status = parseJsonObject(result.stdout);
   if (!status) throw new Error(result.stderr.trim() || "Could not read Claude sign-in status");
   const email = str(status.email);
@@ -117,7 +119,8 @@ export function retryDelayMs(retryAfter: string | null): number {
 export async function readUsage(home: string | null): Promise<UsageRead> {
   const credentials = await readCredentials(home);
   if (!isFresh(credentials)) {
-    await run("claude", ["-p", "/usage", "--no-session-persistence", "--output-format", "json"], {
+    const claude = await claudeCommand();
+    await run(claude.command, [...claude.args, "-p", "/usage", "--no-session-persistence", "--output-format", "json"], {
       env: claudeEnv(home),
       cwd: tmpdir(),
       timeoutMs: 90_000,
@@ -222,11 +225,14 @@ export class ClaudeLogin {
   private canceled = false;
   private exited = false;
 
-  constructor(home: string) {
-    this.child = spawn("claude", ["auth", "login", "--claudeai"], { env: claudeEnv(home), stdio: ["pipe", "pipe", "pipe"] });
+  /** `claude`: from `claudeCommand()`, resolved by the caller since a constructor can't wait for it. */
+  constructor(home: string, claude: ClaudeCommand) {
+    this.child = spawn(claude.command, [...claude.args, "auth", "login", "--claudeai"], { env: claudeEnv(home), stdio: ["pipe", "pipe", "pipe"] });
     this.child.stdin.on("error", () => undefined);
     this.finished = new Promise((resolve) => {
-      this.child.on("error", (error) => resolve({ ok: false, message: `Could not start Claude Code: ${error.message}` }));
+      this.child.on("error", (error) =>
+        resolve({ ok: false, message: `Could not start Claude Code (${describeCommand(claude)}): ${error.message}` }),
+      );
       this.child.on("close", (code) => {
         this.exited = true;
         if (this.canceled) return resolve({ ok: false, message: "Sign-in was canceled." });

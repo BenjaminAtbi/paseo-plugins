@@ -24,6 +24,10 @@ agent; the account cards make an account the default, disable it for a while, or
 lifted. Reopening uses Paseo's `paseo` command; without it, agents move when their session next
 starts.
 
+Sign-ins and usage reads run the same Claude Code as Paseo's agents: the `claude` provider's
+command from Paseo's config (`agents.providers.claude.command`, as an argv array or
+`{ "mode": "replace", "argv": [...] }`), else `claude` from the daemon's PATH.
+
 Usage: one shared poll reads at most one account every two minutes, and only accounts nothing
 else has read lately. Each account card shows its session and weekly windows and per-model
 weekly windows such as Fable ("fb" in the sidebar). The sidebar widget shows one line per

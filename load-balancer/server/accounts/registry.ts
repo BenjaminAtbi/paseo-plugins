@@ -13,6 +13,7 @@ import {
 import { dataPath, readData, writeData } from "../data";
 import { mergeWindow, type HeaderReadings } from "../readings";
 import { ClaudeLogin, hasCredentials, mainIdentity, readIdentity, readUsage } from "./claude";
+import { claudeCommand } from "./claude-command";
 import { prepareClaudeHome, removeHome } from "./homes";
 import { homesDir, mainClaudeDir } from "./paths";
 import { defaultAccount, limitedUntil, type Binding, type Readings } from "./routing";
@@ -524,7 +525,7 @@ export class AccountRegistry {
     const home = existing?.home ?? (await this.newHome());
     if (existing) await prepareClaudeHome(home, true);
     const id = randomBytes(8).toString("hex");
-    const login = new ClaudeLogin(home);
+    const login = new ClaudeLogin(home, await claudeCommand());
     const entry: LoginEntry = {
       view: { id, accountId: existing?.id ?? null, step: "starting", codeUrl: null, message: null },
       login,
