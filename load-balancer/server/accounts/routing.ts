@@ -14,6 +14,8 @@ export interface RoutedAccount {
   disabled: boolean;
   /** A limit a turn ran into, until it lifts. */
   limitedUntil: string | null;
+  /** When the turn ran into it. */
+  limitedAt?: string | null;
   addedAt: string;
 }
 
@@ -34,6 +36,8 @@ export interface RoutingState<A extends RoutedAccount = RoutedAccount> {
 export interface Readings {
   now: number;
   windowsOf(accountId: string): readonly AccountWindow[];
+  /** When the account's newest reading was taken. */
+  readAtOf?(accountId: string): string | null;
 }
 
 export function findAccount<A extends RoutedAccount>(accounts: readonly A[], accountId: string | null | undefined): A | undefined {
@@ -63,9 +67,23 @@ export function readingLimit(windows: readonly AccountWindow[], now: number): st
   return until;
 }
 
+/**
+ * A reading taken after the turn hit its limit that shows every window with room: the limit has
+ * lifted, whatever the notice said. Claude Code's notice can name a later reset than the real one.
+ */
+function liftedSince(account: RoutedAccount, readings: Readings): boolean {
+  const readAt = readings.readAtOf?.(account.id);
+  if (!account.limitedAt || !readAt || Date.parse(readAt) <= Date.parse(account.limitedAt)) return false;
+  const windows = readings.windowsOf(account.id);
+  return windows.length > 0 && windows.every((window) => window.usedPct !== null && window.usedPct < 99);
+}
+
 /** When the account frees up again, or null when it isn't at a limit. */
 export function limitedUntil(account: RoutedAccount, readings: Readings): string | null {
-  const turn = account.limitedUntil && Date.parse(account.limitedUntil) > readings.now ? account.limitedUntil : null;
+  const turn =
+    account.limitedUntil && Date.parse(account.limitedUntil) > readings.now && !liftedSince(account, readings)
+      ? account.limitedUntil
+      : null;
   const reading = readingLimit(readings.windowsOf(account.id), readings.now);
   if (!turn) return reading;
   if (!reading) return turn;

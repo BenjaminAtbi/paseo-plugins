@@ -99,6 +99,11 @@ function isFresh(credentials: Credentials | null): credentials is Credentials {
   return Boolean(credentials?.accessToken) && (!credentials?.expiresAt || credentials.expiresAt > Date.now() + 60_000);
 }
 
+/** Whether Claude Code's own sign-in (~/.claude) holds a token that hasn't expired. */
+export async function mainCredentialsFresh(): Promise<boolean> {
+  return isFresh(await readCredentials(null));
+}
+
 async function readCredentials(home: string | null): Promise<Credentials | null> {
   return parseCredentials(await readFile(join(home ?? mainClaudeDir(), ".credentials.json"), "utf8").catch(() => ""));
 }

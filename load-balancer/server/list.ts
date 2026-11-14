@@ -21,12 +21,12 @@ export async function listUsage(
 ): Promise<{ rows: Row[] }> {
   const { providers } = await paseo.providers.listUsage();
   const rows: Row[] = [];
-  const seen = new Set<string>();
+  const seen = new Map<string, number>();
   for (const provider of providers) {
     // One subscription can be reported twice, by Paseo's own source and by another plugin's, under
-    // the same "<Source> (<email>)" name. Keep the first.
-    if (seen.has(provider.displayName)) continue;
-    seen.add(provider.displayName);
+    // the same "<Source> (<email>)" name. Keep the first that has a reading.
+    const earlier = seen.get(provider.displayName);
+    if (earlier !== undefined && (rows[earlier].error === null || provider.status !== "available")) continue;
     const key = provider.displayName;
     const email = claudeEmail(provider.displayName);
     const headerWindows = email ? headers?.windowsFor(email) : undefined;
@@ -47,14 +47,16 @@ export async function listUsage(
         summary: window.summary === true,
       };
     });
-    rows.push({
+    const row: Row = {
       key,
       title: provider.displayName,
       name: shortName(provider.displayName),
       planLabel: provider.planLabel,
       error: provider.status === "available" ? null : (provider.error ?? provider.status),
       meters,
-    });
+    };
+    if (earlier !== undefined) rows[earlier] = row;
+    else seen.set(provider.displayName, rows.push(row) - 1);
   }
   return { rows };
 }

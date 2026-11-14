@@ -12,7 +12,7 @@ import {
 } from "../../shared/accounts";
 import { dataPath, readData, writeData } from "../data";
 import { mergeWindow, type HeaderReadings } from "../readings";
-import { ClaudeLogin, hasCredentials, mainIdentity, readIdentity, readUsage } from "./claude";
+import { ClaudeLogin, hasCredentials, mainCredentialsFresh, mainIdentity, readIdentity, readUsage } from "./claude";
 import { claudeCommand } from "./claude-command";
 import { prepareClaudeHome, removeHome } from "./homes";
 import { homesDir, mainClaudeDir } from "./paths";
@@ -52,6 +52,8 @@ const AccountSchema = z.object({
   /** A limit a turn ran into. Limits seen in readings are worked out live instead. */
   limitedUntil: z.string().nullable().default(null),
   limitKind: z.enum(["window", "budget"]).nullable().default(null),
+  /** When the turn ran into it: a full reading taken later that shows room overrides it. */
+  limitedAt: z.string().nullable().default(null),
 });
 export type Account = z.infer<typeof AccountSchema>;
 
@@ -216,7 +218,11 @@ export class AccountRegistry {
 
   /** Usage as routing sees it, at `now`. */
   readings(now = Date.now()): Readings {
-    return { now, windowsOf: (accountId) => this.readingOf(accountId).windows };
+    return {
+      now,
+      windowsOf: (accountId) => this.readingOf(accountId).windows,
+      readAtOf: (accountId) => this.readingOf(accountId).readAt,
+    };
   }
 
   async list(agentCounts: ReadonlyMap<string, number> = new Map()): Promise<{
@@ -258,9 +264,16 @@ export class AccountRegistry {
     };
   }
 
-  /** Accounts Paseo's built-in source (the CLI's own login) doesn't already report. */
+  /**
+   * Accounts Paseo's built-in source doesn't already report. That source reads the CLI's own login
+   * from ~/.claude and leaves refreshing its token to the claude command, so once that token expires
+   * (nothing runs there while sessions go through homes) a home holding the same subscription is
+   * reported here instead.
+   */
   async reportable(): Promise<AccountView[]> {
-    return (await this.list()).accounts.filter((account) => !account.isCliLogin);
+    const { accounts } = await this.list();
+    const mainReadable = await mainCredentialsFresh().catch(() => false);
+    return accounts.filter((account) => !account.isCliLogin || (!mainReadable && account.kind === "managed"));
   }
 
   // ------------------------------------------------------------------------- Claude Code's own login
@@ -308,6 +321,7 @@ export class AccountRegistry {
       disabled: existing?.disabled ?? false,
       limitedUntil: null,
       limitKind: null,
+      limitedAt: null,
     };
     await this.update((state) => {
       state.accounts = [...state.accounts.filter((entry) => entry.kind !== "main"), account];
@@ -446,7 +460,7 @@ export class AccountRegistry {
   }
 
   markLimited(accountId: string, until: string, kind: "window" | "budget"): Promise<void> {
-    return this.patch(accountId, { limitedUntil: until, limitKind: kind });
+    return this.patch(accountId, { limitedUntil: until, limitKind: kind, limitedAt: new Date().toISOString() });
   }
 
   setDisabled(accountId: string, disabled: boolean): Promise<void> {
@@ -502,6 +516,7 @@ export class AccountRegistry {
       disabled: false,
       limitedUntil: null,
       limitKind: null,
+      limitedAt: null,
     };
     await this.update((state) => void state.accounts.push(account));
     this.wanted.add(account.id);
