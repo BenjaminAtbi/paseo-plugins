@@ -20,7 +20,7 @@ interface Reading {
   /** Share of the way to the compaction point, 0-100 and beyond. */
   pct: number;
   tone: Tone;
-  /** Mid-turn, a sent `/compact` would wait behind the turn, so the button waits too. */
+  /** Mid-turn, the button queues `/compact` for when the turn ends instead of sending it. */
   busy: boolean;
 }
 
@@ -89,6 +89,11 @@ let paseo: PluginClientContext["paseo"] | null = null;
 
 // Readings for the popover, which renders inside the app and reads them on demand.
 const readings = new Map<string, Reading>();
+// Agents with a compaction asked for mid-turn, sent as soon as the agent goes idle. Held in
+// this app only: closing the app drops the request.
+const queued = new Set<string>();
+// The last failed compaction per agent, shown in the popover until the next attempt.
+const failures = new Map<string, string>();
 const listeners = new Set<() => void>();
 let version = 0;
 function publish() {
@@ -106,20 +111,51 @@ function useReading(agentId: string): Reading | undefined {
   return readings.get(agentId);
 }
 
+/** The same as typing /compact: Claude Code summarises the conversation and carries on from it. */
+async function sendCompact(agentId: string): Promise<void> {
+  failures.delete(agentId);
+  try {
+    if (!paseo) throw new Error("Context bar is not running.");
+    await paseo.agents.ref(agentId).send("/compact");
+  } catch (failure) {
+    failures.set(agentId, failure instanceof Error ? failure.message : String(failure));
+    throw failure;
+  } finally {
+    publish();
+  }
+}
+
 function CompactButton({ theme, reading, close }: { theme: PluginTheme; reading: Reading; close(): void }) {
   const [sending, setSending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const disabled = sending || reading.busy || !paseo;
-  async function compact() {
+  const isQueued = queued.has(reading.agentId);
+  const error = failures.get(reading.agentId);
+  const disabled = sending || !paseo;
+  const label = sending
+    ? "Compacting…"
+    : isQueued
+      ? "Cancel queued compaction"
+      : reading.busy
+        ? "Compact after this turn"
+        : "Compact now";
+  async function press() {
     if (disabled) return;
-    setSending(true);
-    setError(null);
-    try {
-      // The same as typing /compact: Claude Code summarises the conversation and carries on from it.
-      await paseo!.agents.ref(reading.agentId).send("/compact");
+    if (isQueued) {
+      queued.delete(reading.agentId);
+      publish();
+      return;
+    }
+    if (reading.busy) {
+      queued.add(reading.agentId);
+      failures.delete(reading.agentId);
+      publish();
       close();
-    } catch (failure) {
-      setError(failure instanceof Error ? failure.message : String(failure));
+      return;
+    }
+    setSending(true);
+    try {
+      await sendCompact(reading.agentId);
+      close();
+    } catch {
       setSending(false);
     }
   }
@@ -127,9 +163,9 @@ function CompactButton({ theme, reading, close }: { theme: PluginTheme; reading:
     <View style={{ gap: 6, marginTop: 4 }}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel="Compact the conversation now"
+        accessibilityLabel={label}
         disabled={disabled}
-        onPress={() => void compact()}
+        onPress={() => void press()}
         style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => ({
           alignSelf: "flex-start",
           paddingHorizontal: 12,
@@ -141,10 +177,12 @@ function CompactButton({ theme, reading, close }: { theme: PluginTheme; reading:
           opacity: disabled ? 0.5 : 1,
         })}
       >
-        <Text style={{ color: theme.colors.foreground, fontSize: 13 }}>{sending ? "Compacting…" : "Compact now"}</Text>
+        <Text style={{ color: theme.colors.foreground, fontSize: 13 }}>{label}</Text>
       </Pressable>
-      {reading.busy ? (
-        <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>Available once the current turn ends.</Text>
+      {isQueued ? (
+        <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>
+          Compaction queued: it runs as soon as the current turn ends.
+        </Text>
       ) : null}
       {error ? <Text style={{ color: theme.colors.statusDanger, fontSize: 12 }}>{error}</Text> : null}
     </View>
@@ -212,6 +250,13 @@ export function startContextPills(client: PluginClientContext): () => void {
       busy: agent.status === "running",
     };
     readings.set(agent.id, reading);
+    if (agent.status === "idle" && queued.delete(agent.id)) {
+      void sendCompact(agent.id).catch((error) =>
+        console.warn("[context-bar] queued compaction failed", error),
+      );
+    } else if (agent.status === "error" && queued.delete(agent.id)) {
+      failures.set(agent.id, "The turn ended in an error, so the queued compaction was not sent.");
+    }
     publish();
 
     const label = barLabel(reading);
@@ -242,6 +287,8 @@ export function startContextPills(client: PluginClientContext): () => void {
   function drop(agentId: string) {
     pills.get(agentId)?.registration.remove();
     pills.delete(agentId);
+    queued.delete(agentId);
+    failures.delete(agentId);
     if (readings.delete(agentId)) publish();
   }
 

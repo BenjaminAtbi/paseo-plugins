@@ -3,7 +3,9 @@ is to Claude Code's next automatic compaction, as a text bar such as `▰▰▰�
 Hover it for the token counts. A dot beside it turns from green to amber at 70% of the
 way and red above 90%. It updates during a turn, at every model call, not only when the
 turn ends. Tap it for the exact token counts, where the compaction point came from, and a
-"Compact now" button that sends `/compact` to the agent (once its current turn has ended).
+"Compact now" button that sends `/compact` to the agent. Mid-turn the button reads "Compact
+after this turn": it queues the compaction and sends it as soon as the turn ends (press it
+again to cancel). The queue lives in the app, so closing the app drops it.
 
 Paseo's own context ring measures against the model's whole window. This bar measures
 against the point where Claude Code actually compacts: `modelSettings.<model>.autoCompactWindow`
