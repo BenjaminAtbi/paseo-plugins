@@ -1,5 +1,5 @@
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
-import { SHORT_LABELS, toneFor, type Meter, type Row } from "../shared/usage";
+import { SHORT_LABELS, settledMeter, toneFor, type Meter, type Row } from "../shared/usage";
 import { mergeWindow, type HeaderReadings } from "./readings";
 
 /** The account part of "Claude (someone@example.com)", trimmed to its local part. */
@@ -37,7 +37,7 @@ export async function listUsage(
       };
       const merged = mergeWindow(polled, headerWindows?.[window.id]);
       const { usedPct, resetsAt } = merged;
-      return {
+      return settledMeter({
         key: `${key}/${window.id}`,
         label: window.label,
         shortLabel: SHORT_LABELS[window.id] ?? window.shortLabel ?? window.label,
@@ -45,7 +45,7 @@ export async function listUsage(
         resetsAt,
         tone: toneFor(usedPct, merged === polled ? window.tone : undefined),
         summary: window.summary === true,
-      };
+      });
     });
     const row: Row = {
       key,

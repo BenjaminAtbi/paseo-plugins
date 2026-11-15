@@ -35,6 +35,18 @@ export const listUsageRpc = defineRpc({
   output: z.object({ rows: z.array(rowSchema) }),
 });
 
+/** Claude's session window: at its limit, the sidebar counts down to its reset instead. */
+export const FIVE_HOUR_MS = 5 * 60 * 60_000;
+
+/**
+ * A meter as of `now`: once its reset has passed, the window has started over, whatever the
+ * reading (taken before the reset, and cached for minutes) still says.
+ */
+export function settledMeter(meter: Meter, now = Date.now()): Meter {
+  if (!meter.resetsAt || Date.parse(meter.resetsAt) > now) return meter;
+  return { ...meter, usedPct: 0, resetsAt: null, tone: "ok" };
+}
+
 /** Sidebar labels that override the source's own, keyed by window id. */
 export const SHORT_LABELS: Record<string, string> = { five_hour: "5h", weekly: "wk", weekly_model_fable: "fb" };
 
