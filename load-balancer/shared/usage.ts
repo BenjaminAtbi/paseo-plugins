@@ -47,6 +47,16 @@ export function settledMeter(meter: Meter, now = Date.now()): Meter {
   return { ...meter, usedPct: 0, resetsAt: null, tone: "ok" };
 }
 
+/**
+ * Waits for the next usage reading: resolves with the new version as soon as one lands, or after
+ * about 20 seconds with the same one. The app refreshes its meters on a change and asks again.
+ */
+export const waitForReadingRpc = defineRpc({
+  name: "usage.wait",
+  input: z.object({ since: z.number().int() }),
+  output: z.object({ version: z.number().int() }),
+});
+
 /** Sidebar labels that override the source's own, keyed by window id. */
 export const SHORT_LABELS: Record<string, string> = { five_hour: "5h", weekly: "wk", weekly_model_fable: "fb" };
 

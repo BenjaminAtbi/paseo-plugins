@@ -43,7 +43,7 @@ export function UsageFooter({ theme, openScreen }: PluginSidebarItemProps) {
 
   if (rows.length === 0) return null;
   const muted = theme.colors.foregroundMuted;
-  const yellow = theme.colors.statusWarning;
+  const blue = theme.colors.accent;
   return (
     <Pressable
       accessibilityRole="button"
@@ -66,7 +66,7 @@ export function UsageFooter({ theme, openScreen }: PluginSidebarItemProps) {
           {row.meters.map((meter) => {
             const left = countdown(meter, now);
             const color =
-              left !== null ? yellow : meter.tone === "warning" || meter.tone === "danger" ? toneColor(meter.tone, theme) : theme.colors.foreground;
+              left !== null ? blue : meter.tone === "warning" || meter.tone === "danger" ? toneColor(meter.tone, theme) : theme.colors.foreground;
             return (
               <View key={meter.key} style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 4 }}>
                 {left !== null ? (

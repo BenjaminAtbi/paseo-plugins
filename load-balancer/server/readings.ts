@@ -69,17 +69,24 @@ export class HeaderReadings {
   /** `listIdentities` gives every known `<orgUuid>|<email>`, to tell whose response a header is on. */
   constructor(private readonly listIdentities: () => Promise<string[]>) {}
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Called after each reading is kept. */
+  onChange: (() => void) | null = null;
 
   async load(): Promise<void> {
     const saved = StoreSchema.safeParse(await readData(this.path));
     if (saved.success) this.byEmail = { ...saved.data, ...this.byEmail };
   }
 
-  record(headers: IncomingHttpHeaders): void {
+  /**
+   * Takes the usage headers of one model response. `email` names whose response it was when the
+   * caller knows (the Claude Code mod's hand-off does); otherwise the organization header decides.
+   */
+  record(headers: IncomingHttpHeaders, options: { now?: Date; email?: string | null } = {}): void {
+    const windows = parseHeaders(headers, options.now);
+    if (Object.keys(windows).length === 0) return;
+    if (options.email) return this.store(options.email.toLowerCase(), windows);
     const org = single(headers["anthropic-organization-id"]);
-    const windows = parseHeaders(headers);
-    if (!org || Object.keys(windows).length === 0) return;
-    void this.attribute(org, windows).catch(() => undefined);
+    if (org) void this.attribute(org, windows).catch(() => undefined);
   }
 
   windowsFor(email: string): Windows | undefined {
@@ -95,9 +102,20 @@ export class HeaderReadings {
 
   private async attribute(org: string, windows: Windows): Promise<void> {
     const email = emailForOrg(await this.knownIdentities(), org);
-    if (!email) return;
-    this.byEmail[email] = { ...this.byEmail[email], ...windows };
+    if (email) this.store(email, windows);
+  }
+
+  /** Keeps each window's newest reading: hand-offs and proxied responses can arrive out of order. */
+  private store(email: string, windows: Windows): void {
+    const kept = { ...this.byEmail[email] };
+    for (const [id, window] of Object.entries(windows)) {
+      const old = kept[id];
+      if (old?.readAt && window.readAt && Date.parse(old.readAt) > Date.parse(window.readAt)) continue;
+      kept[id] = window;
+    }
+    this.byEmail[email] = kept;
     this.saveTimer ??= setTimeout(() => this.flush(), SAVE_MS);
+    this.onChange?.();
   }
 
   private async knownIdentities(): Promise<string[]> {

@@ -1,13 +1,44 @@
 import { useRpc, useSettings } from "@getpaseo/plugin/client";
 import type { PluginTheme } from "@getpaseo/plugin";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
 import { betaSettings, displaySettings } from "../shared/settings";
-import { listUsageRpc, type Tone } from "../shared/usage";
+import { listUsageRpc, waitForReadingRpc, type Tone } from "../shared/usage";
 
-// The daemon caches each report for five minutes, so polling faster only re-reads its cache.
-const REFRESH_MS = 60_000;
+// Load Balancer's own accounts read from its live readings; other sources from Paseo's report,
+// which the daemon keeps for five minutes.
+const REFRESH_MS = 15_000;
+
+/**
+ * Refreshes every Load Balancer query as soon as a usage reading lands: a long-held call the
+ * server answers on the next reading, then asked again. The timed refreshes stay as the fallback.
+ */
+export function useLiveReadings(): void {
+  const wait = useRpc(waitForReadingRpc);
+  const client = useQueryClient();
+  useEffect(() => {
+    let stopped = false;
+    void (async () => {
+      let since = -1;
+      while (!stopped) {
+        try {
+          const { version } = await wait({ since });
+          if (stopped) return;
+          if (since !== -1 && version !== since) void client.invalidateQueries({ queryKey: ["load-balancer"] });
+          since = version;
+        } catch {
+          await new Promise((resolve) => setTimeout(resolve, 5_000));
+        }
+      }
+    })();
+    return () => {
+      stopped = true;
+    };
+  }, [wait, client]);
+}
 
 export function useUsageRows() {
+  useLiveReadings();
   const listUsage = useRpc(listUsageRpc);
   return useQuery({
     queryKey: ["load-balancer", "rows"],

@@ -18,8 +18,8 @@ export function BetaSettings({ theme }: { theme: PluginTheme }) {
         <Text style={{ color: theme.colors.statusDanger }}>{beta.settings.saveError}</Text>
       ) : null}
       <SettingsSwitch
-        label="Read Claude usage from model responses"
-        hint="Routes Claude sessions through a local proxy, from each session's next open. Polling stays as the fallback."
+        label="Read usage through a local proxy"
+        hint="For sessions that can't load Load Balancer's Claude Code mod (Claude Code before 2.1.321, or an organization that blocks mods), or other providers. Routes Claude sessions through a local proxy from each session's next open."
         value={beta.headerProxy}
         disabled={beta.settings.status !== "ready" || beta.settings.saving}
         onValueChange={toggleHeaderProxy}

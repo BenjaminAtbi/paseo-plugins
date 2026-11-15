@@ -1,6 +1,6 @@
 // Adapted from ZeroSub (https://github.com/kapybara-org/zerosub, MIT, Copyright (c) 2026 Kapybara).
 import type { PluginHookContext, PluginLifecycleEvents } from "@getpaseo/plugin/server";
-import type { AgentRoute, ReopenSummary } from "../../shared/accounts";
+import type { AgentRoute, ReopenSummary, WaitingState } from "../../shared/accounts";
 import type { RoutingPreferences } from "../../shared/settings";
 import { SWITCH_ROW_KIND, SWITCH_ROW_VERSION, type SwitchRow } from "../../shared/timeline";
 import { sessionEnv } from "./claude";
@@ -147,7 +147,7 @@ export class Switcher {
     return claude;
   }
 
-  private async isClaude(paseo: Paseo, provider: string): Promise<boolean> {
+  async isClaude(paseo: Paseo, provider: string): Promise<boolean> {
     return (await this.claudeProviders(paseo)).has(provider);
   }
 
@@ -367,12 +367,10 @@ export class Switcher {
     if (!next) {
       if (problem.kind === "limit") {
         await this.registry.update((draft) => {
-          draft.waiting[agentId] = { accountId: account.id, since: new Date(now).toISOString() };
+          draft.waiting[agentId] = { accountId: account.id, since: new Date(now).toISOString(), continue: prefs.autoContinue };
         });
-        const detail = prefs.autoContinue
-          ? "It carries on by itself once an account frees up."
-          : "A note here will say when an account frees up.";
-        await this.appendRow(paseo, agentId, { ...base, to: account.label, reason: "exhausted", outcome: "stayed", detail });
+        // The note's checkbox says whether it carries on by itself.
+        await this.appendRow(paseo, agentId, { ...base, to: account.label, reason: "exhausted", outcome: "stayed" });
       }
       return;
     }
@@ -396,6 +394,22 @@ export class Switcher {
   }
 
   // ------------------------------------------------------------------ waiting for room
+
+  async waitingState(agentId: string): Promise<WaitingState> {
+    const entry = this.registry.current().waiting[agentId];
+    const prefs = entry ? await this.prefs() : null;
+    return { waiting: Boolean(entry), continue: entry?.continue ?? prefs?.autoContinue ?? false };
+  }
+
+  async setWaitingContinue(agentId: string, value: boolean): Promise<WaitingState> {
+    if (this.registry.current().waiting[agentId]) {
+      await this.registry.update((draft) => {
+        const entry = draft.waiting[agentId];
+        if (entry) entry.continue = value;
+      });
+    }
+    return this.waitingState(agentId);
+  }
 
   private async stopWaiting(agentId: string): Promise<void> {
     if (!this.registry.current().waiting[agentId]) return;
@@ -434,8 +448,11 @@ export class Switcher {
     if (!this.registry.current().waiting[agentId]) return;
     // Not caught: a failed lookup leaves the agent waiting, while a missing agent stops it.
     const agent = (await paseo.agents.ref(agentId).refresh())?.agent;
-    // Gone, closed, or already carried on by hand.
-    if (!agent || agent.archivedAt || !settled(agent.status)) return this.stopWaiting(agentId);
+    // Gone, or already carried on by hand. A closed agent still waits: Paseo unloads idle agents
+    // after a while, and a message opens it again.
+    if (!agent || agent.archivedAt) return this.stopWaiting(agentId);
+    const closed = agent.status === "closed";
+    if (!closed && !settled(agent.status)) return this.stopWaiting(agentId);
     const now = Date.now();
     const readings = this.registry.readings(now);
     const own = this.registry.runningOn(agentId);
@@ -443,13 +460,15 @@ export class Switcher {
     const target = own && isUsable(own, readings) ? own : routed && isUsable(routed, readings) ? routed : undefined;
     if (!target) return; // Still full.
     const at = new Date(now).toISOString();
+    const continued = this.registry.current().waiting[agentId]?.continue ?? prefs.autoContinue;
     const moving = target.id !== own?.id;
     if (moving) {
       await this.registry.update((draft) => {
         draft.bindings[agentId] = { accountId: target.id, source: "auto", at };
       });
       this.guard.note(agentId, now);
-      const outcome = await this.reopenAgent(paseo, agentId);
+      // A closed agent opens on its new binding with the message that carries it on.
+      const outcome = closed ? "reopened" : await this.reopenAgent(paseo, agentId);
       if (outcome !== "reopened") {
         // Running again, or closed: it opens on the new account when it next starts.
         if (outcome === "failed") console.warn(`[Load Balancer] could not move ${agentId} to ${target.label} to carry on`);
@@ -457,12 +476,11 @@ export class Switcher {
       }
     }
     await this.stopWaiting(agentId);
-    const continued = prefs.autoContinue;
     await this.appendRow(
       paseo,
       agentId,
       this.landed(
-        { from: own?.label ?? null, to: target.label, reason: "freed", resetsAt: null, continued, outcome: moving ? "switched" : "stayed", detail: null, at },
+        { from: own?.label ?? null, to: target.label, reason: "freed", resetsAt: null, continued, outcome: moving ? (closed ? "pending" : "switched") : "stayed", detail: null, at },
         agentId,
       ),
     );

@@ -65,7 +65,12 @@ const BindingSchema = z.object({
 const SessionSchema = z.object({ accountId: z.string(), openedAt: z.string() });
 export type Session = z.infer<typeof SessionSchema>;
 /** An agent stopped at a limit with every account full, to carry on once one has room. */
-const WaitingSchema = z.object({ accountId: z.string(), since: z.string() });
+const WaitingSchema = z.object({
+  accountId: z.string(),
+  since: z.string(),
+  /** Send the continue prompt once it can; the timeline note's checkbox sets it. Unset: the routing setting. */
+  continue: z.boolean().optional(),
+});
 export type Waiting = z.infer<typeof WaitingSchema>;
 
 const StateSchema = z.object({
@@ -146,6 +151,9 @@ export class AccountRegistry {
   private timer: ReturnType<typeof setInterval> | null = null;
   private writes: Promise<void> = Promise.resolve();
   private main: { at: number; identity: string | null } = { at: 0, identity: null };
+
+  /** Called after each poll that brought a reading. */
+  onChange: (() => void) | null = null;
 
   constructor(private readonly headers: HeaderReadings) {}
 
@@ -420,6 +428,7 @@ export class AccountRegistry {
     this.polled.set(account.id, { windows: result.windows, readAt: result.readAt, source: result.cached ? "cli" : "poll" });
     if (!account.signedIn) await this.patch(account.id, { signedIn: true });
     this.queueWrite(this.usagePath, () => Object.fromEntries(this.polled));
+    this.onChange?.();
   }
 
   /** Asks for a reading at the next free slot; never sooner than the spacing allows. */

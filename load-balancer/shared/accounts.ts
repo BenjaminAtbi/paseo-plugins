@@ -130,6 +130,22 @@ export const clearLimitRpc = defineRpc({
   output: ok,
 });
 
+/** Whether an agent waits for a full account to free up, and carries on by itself when one does. */
+export const waitingStateSchema = z.object({ waiting: z.boolean(), continue: z.boolean() });
+export type WaitingState = z.infer<typeof waitingStateSchema>;
+
+export const getWaitingRpc = defineRpc({
+  name: "waiting.get",
+  input: z.object({ agentId: z.string() }),
+  output: waitingStateSchema,
+});
+
+export const setWaitingContinueRpc = defineRpc({
+  name: "waiting.continue",
+  input: z.object({ agentId: z.string(), continue: z.boolean() }),
+  output: waitingStateSchema,
+});
+
 /** `accountId: null` makes the agent follow the default again. */
 export const setAgentAccountRpc = defineRpc({
   name: "accounts.agent",

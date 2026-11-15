@@ -1,5 +1,8 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
+import { installMod, forgetAgent, withMod } from "./server/claude-mod";
+import { Changes } from "./server/changes";
 import { listUsage } from "./server/list";
+import { ModHandoff } from "./server/mod-handoff";
 import { AccountRegistry } from "./server/accounts/registry";
 import { Switcher } from "./server/accounts/swap";
 import { discoverAccounts, fetchAccountUsage, lbInputSchema } from "./server/accounts/usage-source";
@@ -7,7 +10,7 @@ import { HeaderProxy } from "./server/proxy";
 import { HeaderReadings } from "./server/readings";
 import { routeSession } from "./server/route";
 import { betaSettings, displaySettings, routingSettings } from "./shared/settings";
-import { listUsageRpc } from "./shared/usage";
+import { listUsageRpc, waitForReadingRpc } from "./shared/usage";
 import {
   cancelLoginRpc,
   clearLimitRpc,
@@ -17,6 +20,8 @@ import {
   renameAccountRpc,
   setAccountEnabledRpc,
   setAgentAccountRpc,
+  getWaitingRpc,
+  setWaitingContinueRpc,
   setDefaultAccountRpc,
   startLoginRpc,
   submitLoginCodeRpc,
@@ -39,6 +44,10 @@ export default function contribute(server: PluginServerContext) {
     return state.status === "ready" ? state.values : null;
   });
   const proxy = new HeaderProxy((headers) => readings.record(headers));
+  const changes = new Changes();
+  readings.onChange = () => changes.bump();
+  registry.onChange = () => changes.bump();
+  const handoff = new ModHandoff(readings, (agentId) => registry.runningOn(agentId)?.email ?? null);
 
   async function proxyEnabled(): Promise<boolean> {
     const state = await beta.read();
@@ -49,6 +58,8 @@ export default function contribute(server: PluginServerContext) {
   // are not reopened by a settings change, so it keeps listening until the plugin stops.
   void (async () => {
     await readings.load();
+    await installMod().catch((error: unknown) => console.error("[Load Balancer] could not write the Claude Code mod", describe(error)));
+    handoff.start();
     await registry.start();
     switcher.start();
     if (await proxyEnabled()) await proxy.start();
@@ -74,6 +85,15 @@ export default function contribute(server: PluginServerContext) {
       } catch (error) {
         console.error(`[Load Balancer] could not route ${request.agentId} through the proxy`, describe(error));
       }
+      try {
+        // Every interactive Claude session loads the mod, which hands over each response's usage.
+        const base = routed ?? request;
+        if (base.purpose === "interactive" && (await switcher.isClaude(context.paseo, base.provider))) {
+          routed = { ...base, env: withMod(base.env, base.agentId) };
+        }
+      } catch (error) {
+        console.error(`[Load Balancer] could not load the Claude Code mod into ${request.agentId}`, describe(error));
+      }
       return routed;
     };
     try {
@@ -83,17 +103,26 @@ export default function contribute(server: PluginServerContext) {
     }
   });
   server.on("agent.turn_ended", (event, context) => {
-    void switcher.onTurnEnded(event, context.paseo).catch((error: unknown) => console.error("[Load Balancer] turn handling failed", describe(error)));
+    // The mod wrote the turn's last reading before the turn ended; take it before judging the turn.
+    void handoff
+      .ingest(event.agent.id)
+      .catch(() => undefined)
+      .then(() => switcher.onTurnEnded(event, context.paseo))
+      .catch((error: unknown) => console.error("[Load Balancer] turn handling failed", describe(error)));
   });
   server.on("agent.archived", (event) => {
     void switcher.onArchived(event.agent.id)?.catch(() => undefined);
+    handoff.forget(event.agent.id);
+    void forgetAgent(event.agent.id).catch(() => undefined);
   });
 
   server.handle(listUsageRpc, async (input, context) => {
     // The sidebar asks for this regularly, which keeps a Paseo handle at hand for waiting agents.
     switcher.remember(context.paseo);
-    return listUsage(input, context, (await proxyEnabled()) ? readings : null);
+    // Readings come from the mod's hand-offs and, when it is on, the proxy.
+    return listUsage(input, context, readings, (await registry.list()).accounts);
   });
+  server.handle(waitForReadingRpc, async ({ since }) => ({ version: await changes.wait(since, 20_000) }));
   const ok = { ok: true as const };
   server.handle(listAccountsRpc, async (_input, context) => {
     const [view, prefs] = await Promise.all([switcher.view(context.paseo), routing.read()]);
@@ -123,6 +152,8 @@ export default function contribute(server: PluginServerContext) {
   });
   server.handle(setDefaultAccountRpc, ({ accountId }, context) => switcher.setDefault(context.paseo, accountId));
   server.handle(setAccountEnabledRpc, ({ accountId, enabled }, context) => switcher.setEnabled(context.paseo, accountId, enabled));
+  server.handle(getWaitingRpc, ({ agentId }) => switcher.waitingState(agentId));
+  server.handle(setWaitingContinueRpc, ({ agentId, continue: value }) => switcher.setWaitingContinue(agentId, value));
   server.handle(setAgentAccountRpc, ({ agentId, accountId }, context) => switcher.setAgentAccount(context.paseo, agentId, accountId));
   server.handle(clearLimitRpc, async ({ accountId }) => {
     await switcher.clearLimit(accountId);
@@ -142,6 +173,8 @@ export default function contribute(server: PluginServerContext) {
   });
   return () => {
     readings.flush();
+    handoff.stop();
+    changes.stop();
     switcher.stop();
     registry.stop();
     proxy.stop();

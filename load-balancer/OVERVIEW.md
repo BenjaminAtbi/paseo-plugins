@@ -37,8 +37,16 @@ weekly windows such as Fable ("fb" in the sidebar). The sidebar widget shows one
 account, its meters coloured by how much is used (green below 70%, amber from 70%, red above
 90%); the switch at the end of each window's line on a card chooses whether it shows there.
 
-Beta: the settings page has a switch to read Claude usage from model responses. New Claude sessions
-then run through a local proxy inside the plugin, which copies the session and weekly usage
+Claude Code mod: every Claude session Paseo opens loads a small Claude Code mod that Load Balancer
+writes to its data folder (`claude-mod`) and names in `CLAUDE_CODE_PLUGIN_DIRS`. After each model
+response's headers arrive, the mod writes the session and weekly usage headers to a file per agent
+(`handoff/<agent>.usage.json`), waiting at most 250 ms for the write, and Load Balancer reads it as
+it changes and again when the turn ends. Usage is then current at every model call, with no proxy.
+Needs Claude Code 2.1.321 or later, and an organization's mod guard (managed settings, or a Team or
+Enterprise sign-in) blocks it; polling covers those sessions.
+
+Beta, off by default: for sessions that can't load the mod, or other providers, the settings page
+has a switch to read usage through a local proxy instead. New Claude sessions then run through a local proxy inside the plugin, which copies the session and weekly usage
 headers and forwards everything else unchanged. If a session already has an
 `ANTHROPIC_BASE_URL`, the proxy forwards to it. Paseo's own usage display skips sessions with a non-Anthropic base URL,
 so Load Balancer reports usage for proxied sessions itself. The switch applies from each session's next open.

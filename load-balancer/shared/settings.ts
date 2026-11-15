@@ -16,7 +16,10 @@ export const displaySettings = defineSettings({
   }),
 });
 
-/** Opt-in features. `headerProxy` reads Claude usage from model responses through a local proxy. */
+/**
+ * Opt-in features. `headerProxy` reads usage from model responses through a local proxy, for sessions
+ * the Claude Code mod can't load into, or other providers.
+ */
 export const betaSettings = defineSettings({
   id: "beta",
   scope: "host",

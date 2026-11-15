@@ -1,7 +1,10 @@
 // Adapted from ZeroSub (https://github.com/kapybara-org/zerosub, MIT, Copyright (c) 2026 Kapybara).
-import type { PluginTimelineItemProps } from "@getpaseo/plugin/client";
+import type { PluginTheme } from "@getpaseo/plugin";
+import { useRpc, type PluginTimelineItemProps } from "@getpaseo/plugin/client";
 import { Icon } from "@getpaseo/plugin/client/react-native";
-import { Text, View } from "react-native";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Pressable, Text, View } from "react-native";
+import { getWaitingRpc, setWaitingContinueRpc } from "../shared/accounts";
 import type { SwitchRow } from "../shared/timeline";
 import { formatReset } from "./data";
 
@@ -52,8 +55,35 @@ export function describeRow(row: SwitchRow): string {
   }
 }
 
+/** While the agent waits for an account to free up: whether it carries on by itself when one does. */
+function ContinueCheckbox({ agentId, theme }: { agentId: string; theme: PluginTheme }) {
+  const get = useRpc(getWaitingRpc);
+  const set = useRpc(setWaitingContinueRpc);
+  const client = useQueryClient();
+  const key = ["load-balancer", "waiting", agentId];
+  const state = useQuery({ queryKey: key, queryFn: () => get({ agentId }), refetchInterval: 30_000 });
+  const toggle = useMutation({
+    mutationFn: (value: boolean) => set({ agentId, continue: value }),
+    onSuccess: (next) => client.setQueryData(key, next),
+  });
+  if (!state.data?.waiting) return null;
+  const checked = toggle.isPending ? Boolean(toggle.variables) : state.data.continue;
+  return (
+    <Pressable
+      accessibilityRole="checkbox"
+      accessibilityState={{ checked }}
+      disabled={toggle.isPending}
+      onPress={() => toggle.mutate(!checked)}
+      style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 6 }}
+    >
+      <Icon name={checked ? "SquareCheck" : "Square"} size={14} color={checked ? theme.colors.accent : theme.colors.foregroundMuted} />
+      <Text style={{ color: theme.colors.foregroundMuted, fontSize: 13 }}>Carry on by itself when an account frees up</Text>
+    </Pressable>
+  );
+}
+
 /** Inline note in an agent's timeline when Load Balancer moved it to another account. */
-export function SwitchRowView({ item, theme }: PluginTimelineItemProps<SwitchRow>) {
+export function SwitchRowView({ agentId, item, theme }: PluginTimelineItemProps<SwitchRow>) {
   const row = item.data;
   const freed = row.reason === "freed";
   const warning = !freed && (row.reason === "limit" || row.reason === "signed_out" || row.reason === "exhausted" || row.outcome === "stayed");
@@ -75,7 +105,10 @@ export function SwitchRowView({ item, theme }: PluginTimelineItemProps<SwitchRow
       }}
     >
       <Icon name={icon} size={14} color={warning ? theme.colors.statusWarning : theme.colors.foregroundMuted} />
-      <Text style={{ color: theme.colors.foregroundMuted, fontSize: 13, flexShrink: 1 }}>{describeRow(row)}</Text>
+      <View style={{ flexShrink: 1 }}>
+        <Text style={{ color: theme.colors.foregroundMuted, fontSize: 13 }}>{describeRow(row)}</Text>
+        {row.reason === "exhausted" ? <ContinueCheckbox agentId={agentId} theme={theme} /> : null}
+      </View>
     </View>
   );
 }

@@ -25,7 +25,7 @@ import {
 } from "../shared/accounts";
 import { DEFAULT_CONTINUE_PROMPT, routingSettings, type RoutingPreferences } from "../shared/settings";
 import { isShown, setShown, toneFor, type Meter } from "../shared/usage";
-import { formatPct, formatReset, useDisplaySettings, useUsageRows } from "./data";
+import { formatPct, formatReset, useDisplaySettings, useLiveReadings, useUsageRows } from "./data";
 import { MeterBar } from "./meter";
 
 const QUERY_KEY = ["load-balancer", "accounts"];
@@ -69,6 +69,7 @@ function describeMoves(summary: ReopenSummary): string | null {
 
 function useAccounts(fast: boolean) {
   const list = useRpc(listAccountsRpc);
+  useLiveReadings();
   return useQuery({ queryKey: QUERY_KEY, queryFn: () => list({}), refetchInterval: fast ? 1_000 : 15_000 });
 }
 
@@ -769,8 +770,8 @@ export function AccountsScreen({ theme, layout }: PluginSurfaceProps) {
       <View style={{ gap: 6 }}>
         <Text style={{ color: theme.colors.foreground, fontSize: 20, fontWeight: "700" }}>Claude accounts</Text>
         <Text style={muted}>
-          Accounts Load Balancer tracks. Usage comes from model responses when the beta proxy sees them, else from one
-          shared poll that reads at most one account every two minutes.
+          Accounts Load Balancer tracks. Usage comes from model responses, read by Load Balancer's Claude Code mod (or the
+          beta proxy), else from one shared poll that reads at most one account every two minutes.
         </Text>
       </View>
       <Row>
