@@ -64,6 +64,9 @@ const BindingSchema = z.object({
 });
 const SessionSchema = z.object({ accountId: z.string(), openedAt: z.string() });
 export type Session = z.infer<typeof SessionSchema>;
+/** An agent stopped at a limit with every account full, to carry on once one has room. */
+const WaitingSchema = z.object({ accountId: z.string(), since: z.string() });
+export type Waiting = z.infer<typeof WaitingSchema>;
 
 const StateSchema = z.object({
   accounts: z.array(z.unknown()).default([]),
@@ -71,6 +74,7 @@ const StateSchema = z.object({
   bindings: z.record(z.string(), z.unknown()).default({}),
   /** Which account each agent's live session was opened with. */
   sessions: z.record(z.string(), z.unknown()).default({}),
+  waiting: z.record(z.string(), z.unknown()).default({}),
 });
 
 export interface RegistryState {
@@ -78,6 +82,8 @@ export interface RegistryState {
   defaultAccountId: string | null;
   bindings: Record<string, Binding>;
   sessions: Record<string, Session>;
+  /** Agents waiting for an account to free up, by agent. */
+  waiting: Record<string, Waiting>;
 }
 
 const PolledSchema = z.object({
@@ -130,7 +136,7 @@ function salvage<T>(schema: z.ZodType<T>, entries: Record<string, unknown>): Rec
 export class AccountRegistry {
   private readonly statePath = dataPath("accounts.json");
   private readonly usagePath = dataPath("usage.json");
-  private state: RegistryState = { accounts: [], defaultAccountId: null, bindings: {}, sessions: {} };
+  private state: RegistryState = { accounts: [], defaultAccountId: null, bindings: {}, sessions: {}, waiting: {} };
   private polled = new Map<string, Polled>();
   private errors = new Map<string, string>();
   private logins = new Map<string, LoginEntry>();
@@ -154,6 +160,7 @@ export class AccountRegistry {
         defaultAccountId: saved.data.defaultAccountId,
         bindings: salvage(BindingSchema, saved.data.bindings),
         sessions: salvage(SessionSchema, saved.data.sessions),
+        waiting: salvage(WaitingSchema, saved.data.waiting),
       };
     }
     const usage = z.record(z.string(), z.unknown()).safeParse(await readData(this.usagePath));

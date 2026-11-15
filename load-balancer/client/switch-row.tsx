@@ -27,6 +27,10 @@ function cause(row: SwitchRow): string | null {
 }
 
 export function describeRow(row: SwitchRow): string {
+  if (row.reason === "freed") {
+    const lead = row.outcome === "switched" ? `${row.to} has room again, so this conversation moved to it` : `${row.to} has room again`;
+    return `${lead}${row.continued ? " and carried on." : ". Send a message to carry on."}`;
+  }
   if (row.reason === "exhausted") {
     const reset = formatReset(row.resetsAt);
     return `Every Claude account is at its limit${reset ? `; ${row.from ?? "this one"} ${reset}` : ""}. Add another account or wait.${
@@ -51,8 +55,9 @@ export function describeRow(row: SwitchRow): string {
 /** Inline note in an agent's timeline when Load Balancer moved it to another account. */
 export function SwitchRowView({ item, theme }: PluginTimelineItemProps<SwitchRow>) {
   const row = item.data;
-  const warning = row.reason === "limit" || row.reason === "signed_out" || row.reason === "exhausted" || row.outcome === "stayed";
-  const icon = row.reason === "exhausted" || row.outcome === "stayed" ? "CircleAlert" : "ArrowRightLeft";
+  const freed = row.reason === "freed";
+  const warning = !freed && (row.reason === "limit" || row.reason === "signed_out" || row.reason === "exhausted" || row.outcome === "stayed");
+  const icon = freed ? "Play" : row.reason === "exhausted" || row.outcome === "stayed" ? "CircleAlert" : "ArrowRightLeft";
   return (
     <View
       style={{

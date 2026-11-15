@@ -25,6 +25,8 @@ export const switchRowSchema = z.object({
     "enabled",
     /** Every account is at its limit; nothing to switch to. */
     "exhausted",
+    /** `to` has room again after every account was full; the agent carries on there. */
+    "freed",
   ]),
   /** When the exhausted account frees up again, if known. */
   resetsAt: z.string().nullable(),

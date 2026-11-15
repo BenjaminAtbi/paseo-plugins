@@ -50,6 +50,7 @@ export default function contribute(server: PluginServerContext) {
   void (async () => {
     await readings.load();
     await registry.start();
+    switcher.start();
     if (await proxyEnabled()) await proxy.start();
   })().catch((error: unknown) => console.error("[Load Balancer] startup failed", describe(error)));
 
@@ -88,9 +89,11 @@ export default function contribute(server: PluginServerContext) {
     void switcher.onArchived(event.agent.id)?.catch(() => undefined);
   });
 
-  server.handle(listUsageRpc, async (input, context) =>
-    listUsage(input, context, (await proxyEnabled()) ? readings : null),
-  );
+  server.handle(listUsageRpc, async (input, context) => {
+    // The sidebar asks for this regularly, which keeps a Paseo handle at hand for waiting agents.
+    switcher.remember(context.paseo);
+    return listUsage(input, context, (await proxyEnabled()) ? readings : null);
+  });
   const ok = { ok: true as const };
   server.handle(listAccountsRpc, async (_input, context) => {
     const [view, prefs] = await Promise.all([switcher.view(context.paseo), routing.read()]);
@@ -139,6 +142,7 @@ export default function contribute(server: PluginServerContext) {
   });
   return () => {
     readings.flush();
+    switcher.stop();
     registry.stop();
     proxy.stop();
   };

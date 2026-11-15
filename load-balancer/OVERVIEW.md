@@ -16,7 +16,10 @@ Routing, off until switched on in the Routing section of the settings page. Each
 then opens on the agent's own account if it has one, else the default (or, with "Spread new
 agents", the account with the most room). When a turn ends on a usage limit or a lost sign-in,
 the agent moves to the account with the most room, reopens there and, unless turned off, is told
-to carry on; idle agents on the same account move too. A busy agent moves after its turn. An
+to carry on; idle agents on the same account move too. A busy agent moves after its turn. When
+every account is at its limit, the agent waits: as soon as one has room it moves there if needed
+and, unless turned off, is told to carry on. The wait survives a restart; after one, checking resumes once the
+app is opened or any agent starts a session. An
 account whose session or weekly window reads 100% is skipped by new sessions before any turn runs
 into it. An agent changes accounts at most four times in ten minutes. Each move leaves a note in
 the agent's timeline. The composer's account button and `/account <name|default>` switch one

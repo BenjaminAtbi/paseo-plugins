@@ -24,6 +24,8 @@ const TURN_READ_MS = 10_000;
 const AGENT_LIST_MS = 3_000;
 const PROVIDERS_MS = 30_000;
 const MAX_PAGES = 100;
+/** How often agents waiting for a full account to free up are checked. */
+const WAKE_MS = 30_000;
 
 type Problem = { kind: "limit"; hit: LimitHit } | { kind: "signed_out" };
 type ReopenOutcome = "reopened" | "deferred" | "closed" | "failed";
@@ -102,11 +104,30 @@ export class Switcher {
   private readonly noticeAt = new Map<string, number>();
   private agentCache: { at: number; agents: Promise<AgentInfo[]> } | null = null;
   private providers: { at: number; claude: Promise<Set<string>> } | null = null;
+  /** The newest Paseo handle from a hook or call, for carrying on waiting agents between them. */
+  private paseo: Paseo | null = null;
+  private wakeTimer: ReturnType<typeof setInterval> | null = null;
+  private waking = false;
 
   constructor(
     private readonly registry: AccountRegistry,
     private readonly preferences: () => Promise<RoutingPreferences | null>,
   ) {}
+
+  /** Starts checking for agents to carry on once an account frees up. */
+  start(): void {
+    this.wakeTimer ??= setInterval(() => void this.wake().catch((error: unknown) => log("continuing waiting agents failed", error)), WAKE_MS);
+  }
+
+  stop(): void {
+    if (this.wakeTimer) clearInterval(this.wakeTimer);
+    this.wakeTimer = null;
+  }
+
+  /** Keeps the newest Paseo handle. Hooks and calls hand one over; nothing else does. */
+  remember(paseo: Paseo): void {
+    this.paseo = paseo;
+  }
 
   // ------------------------------------------------------------------ providers and agents
 
@@ -183,6 +204,7 @@ export class Switcher {
 
   /** The session's launch env pointed at the account it should use, or undefined to leave it alone. */
   async route<Request extends SessionOpen>(request: Request, paseo: Paseo): Promise<Request | undefined> {
+    this.remember(paseo);
     const prefs = await this.prefs();
     if (!prefs || !(await this.isClaude(paseo, request.provider))) return undefined;
     const now = Date.now();
@@ -229,6 +251,7 @@ export class Switcher {
   // ------------------------------------------------------------------ turn end
 
   async onTurnEnded(event: TurnEnded, paseo: Paseo): Promise<void> {
+    this.remember(paseo);
     const prefs = await this.prefs();
     if (!prefs || !(await this.isClaude(paseo, event.agent.provider))) return;
     const agentId = event.agent.id;
@@ -242,6 +265,8 @@ export class Switcher {
           return this.handleUnavailable(paseo, prefs, agentId, { kind: "signed_out" });
         }
       }
+      // A turn that got through: whoever was waiting has carried on.
+      await this.stopWaiting(agentId);
     }
     if (this.deferred.has(agentId)) await this.finishDeferred(paseo, agentId, prefs);
   }
@@ -271,9 +296,11 @@ export class Switcher {
     this.deferred.delete(agentId);
     this.guard.forget(agentId);
     this.noticeAt.delete(agentId);
-    if (!this.registry.current().sessions[agentId]) return undefined;
+    const state = this.registry.current();
+    if (!state.sessions[agentId] && !state.waiting[agentId]) return undefined;
     return this.registry.update((draft) => {
       delete draft.sessions[agentId];
+      delete draft.waiting[agentId];
     });
   }
 
@@ -309,7 +336,10 @@ export class Switcher {
     let resetsAt: string | null = null;
     if (problem.kind === "limit") {
       const { hit } = problem;
-      resetsAt = hit.resetsAt ?? this.fullWindowReset(account.id, now) ?? new Date(now + (hit.kind === "budget" ? BUDGET_LIMIT_MS : WINDOW_LIMIT_MS)).toISOString();
+      resetsAt =
+        this.readingReset(account.id, hit.resetsAt, now) ??
+        hit.resetsAt ??
+        new Date(now + (hit.kind === "budget" ? BUDGET_LIMIT_MS : WINDOW_LIMIT_MS)).toISOString();
       await this.registry.markLimited(account.id, resetsAt, hit.kind);
       console.log(`[Load Balancer] ${account.label} hit a ${hit.kind} limit (agent ${agentId}): ${hit.message}`);
     } else {
@@ -336,7 +366,13 @@ export class Switcher {
     const next = mostAvailable(this.registry.current(), this.registry.readings(now), new Set([account.id]));
     if (!next) {
       if (problem.kind === "limit") {
-        await this.appendRow(paseo, agentId, { ...base, to: account.label, reason: "exhausted", outcome: "stayed" });
+        await this.registry.update((draft) => {
+          draft.waiting[agentId] = { accountId: account.id, since: new Date(now).toISOString() };
+        });
+        const detail = prefs.autoContinue
+          ? "It carries on by itself once an account frees up."
+          : "A note here will say when an account frees up.";
+        await this.appendRow(paseo, agentId, { ...base, to: account.label, reason: "exhausted", outcome: "stayed", detail });
       }
       return;
     }
@@ -359,15 +395,109 @@ export class Switcher {
     }
   }
 
-  /** The reset of a whole-account window a reading shows full, for a notice that named no time. */
-  private fullWindowReset(accountId: string, now: number): string | null {
-    const full = this.registry
+  // ------------------------------------------------------------------ waiting for room
+
+  private async stopWaiting(agentId: string): Promise<void> {
+    if (!this.registry.current().waiting[agentId]) return;
+    await this.registry.update((draft) => {
+      delete draft.waiting[agentId];
+    });
+  }
+
+  /** Carries on agents that stopped with every account full, once an account has room. */
+  private async wake(): Promise<void> {
+    const paseo = this.paseo;
+    const waiting = Object.keys(this.registry.current().waiting);
+    if (this.waking || !paseo || waiting.length === 0) return;
+    this.waking = true;
+    try {
+      const prefs = await this.prefs();
+      if (!prefs) return;
+      for (const agentId of waiting) {
+        if (this.switching.has(agentId)) continue;
+        this.switching.add(agentId);
+        try {
+          await this.resume(paseo, prefs, agentId);
+        } catch (error) {
+          // Left waiting: the next check tries again.
+          log(`could not carry on ${agentId}`, error);
+        } finally {
+          this.switching.delete(agentId);
+        }
+      }
+    } finally {
+      this.waking = false;
+    }
+  }
+
+  private async resume(paseo: Paseo, prefs: RoutingPreferences, agentId: string): Promise<void> {
+    if (!this.registry.current().waiting[agentId]) return;
+    // Not caught: a failed lookup leaves the agent waiting, while a missing agent stops it.
+    const agent = (await paseo.agents.ref(agentId).refresh())?.agent;
+    // Gone, closed, or already carried on by hand.
+    if (!agent || agent.archivedAt || !settled(agent.status)) return this.stopWaiting(agentId);
+    const now = Date.now();
+    const readings = this.registry.readings(now);
+    const own = this.registry.runningOn(agentId);
+    const routed = prefs.autoSwitch ? this.target(agentId, true) : undefined;
+    const target = own && isUsable(own, readings) ? own : routed && isUsable(routed, readings) ? routed : undefined;
+    if (!target) return; // Still full.
+    const at = new Date(now).toISOString();
+    const moving = target.id !== own?.id;
+    if (moving) {
+      await this.registry.update((draft) => {
+        draft.bindings[agentId] = { accountId: target.id, source: "auto", at };
+      });
+      this.guard.note(agentId, now);
+      const outcome = await this.reopenAgent(paseo, agentId);
+      if (outcome !== "reopened") {
+        // Running again, or closed: it opens on the new account when it next starts.
+        if (outcome === "failed") console.warn(`[Load Balancer] could not move ${agentId} to ${target.label} to carry on`);
+        return this.stopWaiting(agentId);
+      }
+    }
+    await this.stopWaiting(agentId);
+    const continued = prefs.autoContinue;
+    await this.appendRow(
+      paseo,
+      agentId,
+      this.landed(
+        { from: own?.label ?? null, to: target.label, reason: "freed", resetsAt: null, continued, outcome: moving ? "switched" : "stayed", detail: null, at },
+        agentId,
+      ),
+    );
+    console.log(`[Load Balancer] ${target.label} has room again; ${continued ? "carrying on" : "noted on"} agent ${agentId}`);
+    if (continued) {
+      await paseo.agents
+        .ref(agentId)
+        .send(prefs.continuePrompt)
+        .catch((error: unknown) => log(`could not continue ${agentId}`, error));
+    }
+  }
+
+  /**
+   * The exact reset from the account's readings, in preference to the notice's. The notice gives a
+   * wall-clock time that Claude Code writes with its own time-zone data; read here with Paseo's,
+   * which can disagree (British Columbia's clocks, for one), it can land an hour out. Readings carry
+   * the instant itself. A window the reading shows full wins; otherwise the window resetting
+   * closest to the notice's time, within two hours of it, stands for it.
+   */
+  private readingReset(accountId: string, noticed: string | null, now: number): string | null {
+    const windows = this.registry
       .readings(now)
       .windowsOf(accountId)
-      .filter((window) => (window.id === "five_hour" || window.id === "weekly") && (window.usedPct ?? 0) >= 99 && window.resetsAt);
-    full.sort((a, b) => Date.parse(b.resetsAt ?? "") - Date.parse(a.resetsAt ?? ""));
-    const reset = full[0]?.resetsAt ?? null;
-    return reset && Date.parse(reset) > now ? reset : null;
+      .filter((window) => (window.id === "five_hour" || window.id === "weekly") && window.resetsAt && Date.parse(window.resetsAt) > now);
+    const full = windows
+      .filter((window) => (window.usedPct ?? 0) >= 99)
+      .sort((a, b) => Date.parse(b.resetsAt ?? "") - Date.parse(a.resetsAt ?? ""))[0];
+    if (full?.resetsAt) return full.resetsAt;
+    if (!noticed) return null;
+    const target = Date.parse(noticed);
+    const near = windows
+      .map((window) => ({ resetsAt: window.resetsAt!, gap: Math.abs(Date.parse(window.resetsAt!) - target) }))
+      .filter(({ gap }) => gap <= 2 * 60 * 60_000)
+      .sort((a, b) => a.gap - b.gap)[0];
+    return near?.resetsAt ?? null;
   }
 
   /** Did this agent's own last turn end on a limit? Then its own failover (with a follow-up) handles it. */
@@ -525,6 +655,7 @@ export class Switcher {
 
   /** Where each live Claude agent is routed, and how many agents each account has. */
   async view(paseo: Paseo): Promise<{ agents: AgentRoute[]; counts: Map<string, number>; canReopen: boolean }> {
+    this.remember(paseo);
     const prefs = await this.prefs();
     const counts = new Map<string, number>();
     const agents: AgentRoute[] = [];
@@ -617,6 +748,8 @@ export class Switcher {
     await this.registry.update((draft) => {
       if (accountId) draft.bindings[agentId] = { accountId, source: "user", at: new Date().toISOString() };
       else delete draft.bindings[agentId];
+      // The user has taken over; they carry on when they choose.
+      delete draft.waiting[agentId];
     });
     return this.reconcile(paseo, "manual", [agentId]);
   }
