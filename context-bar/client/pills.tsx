@@ -5,8 +5,8 @@ import type {
   PluginClientContext,
 } from "@getpaseo/plugin/client";
 import type { PluginTheme } from "@getpaseo/plugin";
-import { useSyncExternalStore, type ComponentType } from "react";
-import { Text, View } from "react-native";
+import { useState, useSyncExternalStore, type ComponentType } from "react";
+import { Pressable, Text, View } from "react-native";
 import { compactPoint, compactSettingsRpc, type CompactPoint, type CompactSettings } from "../shared/compact";
 
 type Tone = "ok" | "warning" | "danger";
@@ -20,6 +20,8 @@ interface Reading {
   /** Share of the way to the compaction point, 0-100 and beyond. */
   pct: number;
   tone: Tone;
+  /** Mid-turn, the button queues `/compact` for when the turn ends instead of sending it. */
+  busy: boolean;
 }
 
 interface AgentLike {
@@ -82,8 +84,16 @@ function Dot({ theme, size, tone }: PluginButtonIconProps & { tone: Tone }) {
   );
 }
 
+// The popover's Compact button sends through this; set while the plugin runs.
+let paseo: PluginClientContext["paseo"] | null = null;
+
 // Readings for the popover, which renders inside the app and reads them on demand.
 const readings = new Map<string, Reading>();
+// Agents with a compaction asked for mid-turn, sent as soon as the agent goes idle. Held in
+// this app only: closing the app drops the request.
+const queued = new Set<string>();
+// The last failed compaction per agent, shown in the popover until the next attempt.
+const failures = new Map<string, string>();
 const listeners = new Set<() => void>();
 let version = 0;
 function publish() {
@@ -101,7 +111,85 @@ function useReading(agentId: string): Reading | undefined {
   return readings.get(agentId);
 }
 
-function Details({ theme, ...context }: PluginButtonContentProps) {
+/** The same as typing /compact: Claude Code summarises the conversation and carries on from it. */
+async function sendCompact(agentId: string): Promise<void> {
+  failures.delete(agentId);
+  try {
+    if (!paseo) throw new Error("Context bar is not running.");
+    await paseo.agents.ref(agentId).send("/compact");
+  } catch (failure) {
+    failures.set(agentId, failure instanceof Error ? failure.message : String(failure));
+    throw failure;
+  } finally {
+    publish();
+  }
+}
+
+function CompactButton({ theme, reading, close }: { theme: PluginTheme; reading: Reading; close(): void }) {
+  const [sending, setSending] = useState(false);
+  const isQueued = queued.has(reading.agentId);
+  const error = failures.get(reading.agentId);
+  const disabled = sending || !paseo;
+  const label = sending
+    ? "Compacting…"
+    : isQueued
+      ? "Cancel queued compaction"
+      : reading.busy
+        ? "Compact after this turn"
+        : "Compact now";
+  async function press() {
+    if (disabled) return;
+    if (isQueued) {
+      queued.delete(reading.agentId);
+      publish();
+      return;
+    }
+    if (reading.busy) {
+      queued.add(reading.agentId);
+      failures.delete(reading.agentId);
+      publish();
+      close();
+      return;
+    }
+    setSending(true);
+    try {
+      await sendCompact(reading.agentId);
+      close();
+    } catch {
+      setSending(false);
+    }
+  }
+  return (
+    <View style={{ gap: 6, marginTop: 4 }}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={label}
+        disabled={disabled}
+        onPress={() => void press()}
+        style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => ({
+          alignSelf: "flex-start",
+          paddingHorizontal: 12,
+          paddingVertical: 6,
+          borderRadius: 6,
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+          backgroundColor: pressed || hovered ? theme.colors.surface2 : "transparent",
+          opacity: disabled ? 0.5 : 1,
+        })}
+      >
+        <Text style={{ color: theme.colors.foreground, fontSize: 13 }}>{label}</Text>
+      </Pressable>
+      {isQueued ? (
+        <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>
+          Compaction queued: it runs as soon as the current turn ends.
+        </Text>
+      ) : null}
+      {error ? <Text style={{ color: theme.colors.statusDanger, fontSize: 12 }}>{error}</Text> : null}
+    </View>
+  );
+}
+
+function Details({ theme, close, ...context }: PluginButtonContentProps) {
   const reading = useReading(context.context === "agent" ? context.agentId : "");
   const muted = { color: theme.colors.foregroundMuted, fontSize: 12 };
   if (!reading) return <Text style={muted}>No context reading yet.</Text>;
@@ -124,6 +212,7 @@ function Details({ theme, ...context }: PluginButtonContentProps) {
       <Text style={muted}>
         A per-launch override (CLAUDE_CODE_AUTO_COMPACT_WINDOW or --autocompact) is not visible here.
       </Text>
+      <CompactButton theme={theme} reading={reading} close={close} />
     </View>
   );
 }
@@ -138,6 +227,7 @@ export function startContextPills(client: PluginClientContext): () => void {
   const pills = new Map<string, { registration: PluginButtonRegistration; label: string; title: string; tone: Tone }>();
   let settings: CompactSettings | null = null;
   let stopped = false;
+  paseo = client.paseo;
 
   function render(agent: AgentLike) {
     const used = agent.lastUsage?.contextWindowUsedTokens;
@@ -149,8 +239,24 @@ export function startContextPills(client: PluginClientContext): () => void {
     }
     const point = compactPoint(agent.model, max, settings);
     const pct = (used / point.tokens) * 100;
-    const reading: Reading = { agentId: agent.id, model: agent.model, used, max, point, pct, tone: toneOf(pct) };
+    const reading: Reading = {
+      agentId: agent.id,
+      model: agent.model,
+      used,
+      max,
+      point,
+      pct,
+      tone: toneOf(pct),
+      busy: agent.status === "running",
+    };
     readings.set(agent.id, reading);
+    if (agent.status === "idle" && queued.delete(agent.id)) {
+      void sendCompact(agent.id).catch((error) =>
+        console.warn("[context-bar] queued compaction failed", error),
+      );
+    } else if (agent.status === "error" && queued.delete(agent.id)) {
+      failures.set(agent.id, "The turn ended in an error, so the queued compaction was not sent.");
+    }
     publish();
 
     const label = barLabel(reading);
@@ -181,6 +287,8 @@ export function startContextPills(client: PluginClientContext): () => void {
   function drop(agentId: string) {
     pills.get(agentId)?.registration.remove();
     pills.delete(agentId);
+    queued.delete(agentId);
+    failures.delete(agentId);
     if (readings.delete(agentId)) publish();
   }
 
@@ -228,6 +336,7 @@ export function startContextPills(client: PluginClientContext): () => void {
 
   return () => {
     stopped = true;
+    paseo = null;
     clearInterval(timer);
     unsubscribe?.();
     void release?.();
